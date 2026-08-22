@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.9.1";
+const BUILD_VERSION = "0.9.2";
 const STORAGE_KEY = "khanGrader.lastCapture";
 const CLASS_CONFIG_STORAGE_KEY = "khanGrader.classConfigs";
 const SCHOOLOGY_CONFIG_STORAGE_KEY = "khanGrader.schoologyConfig";
@@ -1024,9 +1024,9 @@ async function previewSchoologyTestGrades() {
   }
 
   const classConfigs = readClassConfigs();
-  const missingSection = classConfigs.find((config) => !config.schoologySectionId);
-  if (!classConfigs.length || missingSection) {
-    setError("Add a Schoology section ID for each class you want to test.");
+  const testClassConfigs = classConfigs.filter((config) => config.schoologySectionId);
+  if (!testClassConfigs.length) {
+    setError("Add at least one Schoology section ID before previewing test grades.");
     return;
   }
 
@@ -1037,16 +1037,32 @@ async function previewSchoologyTestGrades() {
 
   const previousDisabled = setCaptureButtonsDisabled(true);
   try {
-    setStatus("Loading Schoology roster test rows...");
-    lastSchoologyPreview = await buildSchoologyRosterTestPreview(classConfigs, schoologyConfig);
+    setStatus(`Loading Schoology roster test rows for ${testClassConfigs.length} section(s)...`);
+    lastSchoologyPreview = await buildSchoologyRosterTestPreview(testClassConfigs, schoologyConfig);
     renderSchoologyPreview(lastSchoologyPreview);
 
     const readyCount = lastSchoologyPreview.rows.filter((row) => row.status === "ready").length;
     const issueCount = lastSchoologyPreview.rows.length - readyCount;
-    setStatus(issueCount
+    if (!lastSchoologyPreview.rows.length) {
+      setError("Connected to Schoology, but no active student enrollments were returned for the section ID(s).");
+    } else setStatus(issueCount
       ? `Test preview ready: ${readyCount} grade(s) ready, ${issueCount} row(s) need an assignment ID.`
       : `Test preview ready: ${readyCount} Schoology roster grade(s). Use a test assignment before sending.`);
   } catch (error) {
+    lastNetworkProbe = {
+      build: BUILD_VERSION,
+      type: "schoology-test-preview-error",
+      collectedAt: new Date().toISOString(),
+      classConfigs: testClassConfigs.map((config) => ({
+        name: config.name,
+        schoologySectionId: config.schoologySectionId,
+        hasAssignmentId: Boolean(config.schoologyAssignmentId)
+      })),
+      apiBase: schoologyConfig.apiBase,
+      error: error.message || String(error)
+    };
+    elements.networkProbe.textContent = JSON.stringify(lastNetworkProbe, null, 2);
+    elements.copyNetworkProbeButton.disabled = false;
     setError(error.message || String(error));
   } finally {
     restoreCaptureButtonsDisabled(previousDisabled);
@@ -1165,7 +1181,12 @@ async function buildSchoologyRosterTestPreview(classConfigs, schoologyConfig) {
 
   for (const classConfig of classConfigs) {
     if (!classConfig.schoologySectionId) continue;
-    const enrollments = await fetchSchoologyEnrollments(classConfig.schoologySectionId, schoologyConfig);
+    let enrollments;
+    try {
+      enrollments = await fetchSchoologyEnrollments(classConfig.schoologySectionId, schoologyConfig);
+    } catch (error) {
+      throw new Error(`Could not load Schoology enrollments for ${classConfig.name || "class"} / section ${classConfig.schoologySectionId}: ${error.message || String(error)}`);
+    }
     for (const enrollment of enrollments) {
       const name = schoologyEnrollmentName(enrollment);
       const enrollmentId = String(enrollment?.id || "").trim();
@@ -1337,11 +1358,16 @@ async function schoologyFetchJson(path, options, schoologyConfig) {
   };
   if (bodyText) headers["Content-Type"] = "application/json";
 
-  const response = await fetch(url.toString(), {
-    method,
-    headers,
-    body: bodyText
-  });
+  let response;
+  try {
+    response = await fetch(url.toString(), {
+      method,
+      headers,
+      body: bodyText
+    });
+  } catch (error) {
+    throw new Error(`Schoology request failed before the API responded. Reload the extension after updating it, then try again. Details: ${error.message || String(error)}`);
+  }
   const text = await response.text();
   if (!response.ok) {
     throw new Error(`Schoology API ${response.status}: ${text || response.statusText}`);
