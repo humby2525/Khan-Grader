@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.10.1";
+const BUILD_VERSION = "0.10.2";
 const STORAGE_KEY = "khanGrader.lastCapture";
 const CLASS_CONFIG_STORAGE_KEY = "khanGrader.classConfigs";
 const SCHOOLOGY_CONFIG_STORAGE_KEY = "khanGrader.schoologyConfig";
@@ -1280,11 +1280,12 @@ async function fetchSchoologyAssignment(sectionId, assignmentId, schoologyConfig
 }
 
 async function createSchoologyAssignment(classConfig, schoologyConfig, title, due) {
+  const targetMinutes = resolveTargetMinutes(classConfig, schoologyConfig.gradeTargetMinutes);
   const json = await schoologyFetchJson(`/sections/${encodeURIComponent(classConfig.schoologySectionId)}/assignments`, {
     method: "POST",
     body: {
       title,
-      description: `Khan Academy active minutes for ${title}.`,
+      description: `Make sure you spend ${targetMinutes} minutes on Khan this week.`,
       due,
       max_points: schoologyConfig.gradeMaxPoints,
       factor: 1,
