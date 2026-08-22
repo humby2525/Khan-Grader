@@ -3,5 +3,9 @@
 *.pem
 exports/
 captures/
+node_modules/
+.pw-khan-profile/
+playwright-report/
+test-results/
 .DS_Store
 Thumbs.db
