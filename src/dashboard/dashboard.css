@@ -152,6 +152,7 @@ input {
 .summary-grid strong {
   display: block;
   font-size: 17px;
+  overflow-wrap: anywhere;
 }
 
 .section-header {

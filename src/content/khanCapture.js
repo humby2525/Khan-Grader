@@ -17,7 +17,9 @@ function getKhanReport() {
   const selectedText = String(window.getSelection?.() || "");
   const rows = extractKhanRows(pageText);
   const activityRows = extractActivityRows(pageText);
-  const studentSummary = extractStudentSummary(pageText);
+  const dateRangeCandidates = collectDateRangeCandidates(pageText);
+  const dateRange = dateRangeCandidates[0] || "";
+  const studentSummary = extractStudentSummary(pageText, dateRange);
 
   return {
     url: location.href,
@@ -26,7 +28,7 @@ function getKhanReport() {
     activityRows,
     studentSummary,
     pageKind: inferPageKind(pageText, rows, activityRows, studentSummary),
-    dateRange: extractDateRange(pageText),
+    dateRange,
     textSample: pageText.slice(0, 6000),
     selectedTextSample: selectedText.slice(0, 2000),
     diagnostics: {
@@ -37,6 +39,7 @@ function getKhanReport() {
       roleRowCount: document.querySelectorAll('[role="row"]').length,
       iframeCount: document.querySelectorAll("iframe").length,
       shadowRootCount: countShadowRoots(),
+      dateRangeCandidates,
       possibleStudentNames: extractPossibleStudentNames(pageText).slice(0, 40)
     }
   };
@@ -57,24 +60,114 @@ function inferPageKind(pageText, rows, activityRows, studentSummary) {
 }
 
 function extractDateRange(pageText) {
+  return collectDateRangeCandidates(pageText)[0] || "";
+}
+
+function collectDateRangeCandidates(pageText) {
   const lines = getLines(pageText);
+  const candidates = [];
+
   const dateIndex = lines.findIndex((line) => /^date range$/i.test(line) || /date range/i.test(line));
   if (dateIndex >= 0) {
     const next = lines
       .slice(dateIndex + 1, dateIndex + 5)
-      .find((line) => /last|today|yesterday|days|week|month|\/|-| to /i.test(line));
-    if (next) return next;
+      .map(extractDateRangeValue)
+      .find(Boolean);
+    if (next) candidates.push(next);
   }
 
-  return lines.find((line) => /^(last \d+ days|last week|this week|today|yesterday|all time)$/i.test(line)) || "";
+  const dateFilterIndex = lines.findIndex((line) => /^date filter$/i.test(line) || /date filter/i.test(line));
+  if (dateFilterIndex >= 0) {
+    const next = lines
+      .slice(dateFilterIndex + 1, dateFilterIndex + 7)
+      .map(extractDateRangeValue)
+      .find(Boolean);
+    if (next) candidates.push(next);
+  }
+
+  for (const line of lines) {
+    const candidate = extractDateRangeValue(line);
+    if (candidate) candidates.push(candidate);
+  }
+
+  for (const text of getVisibleControlTexts()) {
+    const candidate = extractDateRangeValue(text);
+    if (candidate) candidates.push(candidate);
+  }
+
+  return uniqueCompact(candidates)
+    .filter((candidate) => !/^date\s*(range|filter)$/i.test(candidate))
+    .slice(0, 20);
 }
 
-function extractStudentSummary(pageText) {
+function getVisibleControlTexts() {
+  const selector = [
+    "button",
+    "[role='button']",
+    "[role='combobox']",
+    "[role='listbox']",
+    "[role='option']",
+    "select",
+    "option",
+    "label",
+    "[aria-label]",
+    "[title]"
+  ].join(",");
+
+  return Array.from(document.querySelectorAll(selector))
+    .filter(isVisible)
+    .map((element) => compactText([
+      element.innerText,
+      element.textContent,
+      element.getAttribute("aria-label"),
+      element.getAttribute("title"),
+      element.value
+    ].filter(Boolean).join(" ")))
+    .filter((text) => text && text.length <= 180);
+}
+
+function extractDateRangeValue(text) {
+  const value = compactText(text);
+  if (!value) return "";
+
+  const preset = value.match(/\b(last\s+\d+\s+days|last\s+week|this\s+week|today|yesterday|all\s+time)\b/i);
+  if (preset) return titleCaseDatePreset(preset[1]);
+
+  const numericRange = value.match(/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\s*(?:-|to|through|–|—)\s*\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/i);
+  if (numericRange) return normalizeDateRangeText(numericRange[0]);
+
+  const month = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\.?";
+  const namedRange = value.match(new RegExp(`\\b${month}\\s+\\d{1,2}(?:,\\s*\\d{4})?\\s*(?:-|to|through|–|—)\\s*${month}\\s+\\d{1,2}(?:,\\s*\\d{4})?\\b`, "i"));
+  if (namedRange) return normalizeDateRangeText(namedRange[0]);
+
+  return "";
+}
+
+function titleCaseDatePreset(value) {
+  return compactText(value).toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function normalizeDateRangeText(value) {
+  return compactText(value).replace(/\s*(?:–|—|to|through)\s*/i, " - ");
+}
+
+function uniqueCompact(values) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values.map(compactText).filter(Boolean)) {
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+  }
+  return result;
+}
+
+function extractStudentSummary(pageText, detectedDateRange = extractDateRange(pageText)) {
   const lines = getLines(pageText);
   const studentName = extractStudentName(lines);
   const exerciseMinutes = findMetricMinutes(lines, /^exercises?$/i, /exercises?/i);
   const timeOnTaskMinutes = findMetricMinutes(lines, /^time\s*on\s*task$/i, /time\s*on\s*task/i);
-  const detectedDateRange = extractDateRange(pageText);
 
   return {
     studentName,
@@ -174,7 +267,7 @@ function extractKhanRows(pageText) {
 
 function extractActivityRows(pageText) {
   const tableRows = Array.from(document.querySelectorAll("tr"))
-    .map(extractActivityFromElement)
+    .map((row) => extractActivityFromTableRow(row) || extractActivityFromElement(row))
     .filter(Boolean);
 
   const roleRows = Array.from(document.querySelectorAll('[role="row"], li'))
@@ -186,6 +279,50 @@ function extractActivityRows(pageText) {
 
   return dedupeActivityRows([...selectedRows, ...tableRows, ...roleRows, ...pageTextRows])
     .sort((a, b) => (a.dateText || "").localeCompare(b.dateText || "") || a.activity.localeCompare(b.activity));
+}
+
+function extractActivityFromTableRow(row) {
+  if (!isVisible(row)) return null;
+  const cells = Array.from(row.querySelectorAll("th,td")).map((cell) => compactText(cell.innerText));
+  if (cells.length < 4) return null;
+
+  const dateIndex = cells.findIndex((cell) => parseDateText(cell));
+  if (dateIndex < 0) return null;
+
+  const dateText = parseDateText(cells[dateIndex]);
+  const activity = inferActivityFromCells(cells, dateIndex);
+  const minutes = inferMinutesFromActivityCells(cells, dateIndex);
+  if (!activity || minutes === null) return null;
+
+  return {
+    dateText,
+    activity,
+    minutes,
+    sourceText: cells.join(" | ")
+  };
+}
+
+function inferActivityFromCells(cells, dateIndex) {
+  const beforeDate = cells.slice(0, dateIndex).filter(Boolean);
+  const activity = beforeDate[0] || "";
+  const course = beforeDate.slice(1).find((cell) => !isActivityLabel(cell));
+  return compactText([activity, course].filter(Boolean).join(" - "));
+}
+
+function inferMinutesFromActivityCells(cells, dateIndex) {
+  const candidates = cells
+    .slice(dateIndex + 1)
+    .filter((cell) => !/^\d+\s*\/\s*\d+$/.test(cell))
+    .map((cell) => {
+      const explicit = parseMinutes(cell);
+      if (explicit !== null) return explicit;
+
+      const numeric = compactText(cell).match(/^\d+(?:\.\d+)?$/);
+      return numeric ? Math.round(Number(numeric[0])) : null;
+    })
+    .filter((value) => value !== null);
+
+  return candidates.length ? candidates[0] : null;
 }
 
 function extractActivityFromElement(element) {
