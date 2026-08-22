@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.6.0";
+const BUILD_VERSION = "0.6.1";
 const STORAGE_KEY = "khanGrader.lastCapture";
 
 const elements = {};
@@ -221,7 +221,12 @@ async function captureClassViaApi() {
   try {
     const rosterResult = await collectKhanRoster(tab);
     if (!rosterResult.students.length) {
+      renderRosterDiagnostics(rosterResult);
       throw new Error("No students with Khan IDs were found. Open the Individual Student Report, click Switch student once, then try again.");
+    }
+    if (rosterResult.students.length === 1) {
+      renderRosterDiagnostics(rosterResult);
+      throw new Error("Only the current student was found. Open the Khan Switch student menu so the full roster is visible, then run Capture Class via Khan API again.");
     }
 
     setStatus(`Found ${rosterResult.students.length} student(s). Requesting Khan minutes for ${startDate} through ${endDate}...`);
@@ -336,6 +341,7 @@ async function requestKhanActivityForCurrentStudent(tab, startDate, endDate) {
 async function collectKhanRoster(tab) {
   const results = await chrome.scripting.executeScript({
     target: { tabId: tab.id, allFrames: true },
+    world: "MAIN",
     func: collectKhanStudentRosterFromPage
   });
 
@@ -473,6 +479,17 @@ function buildClassApiCapture(tab, rosterResult, apiResult, startDate, endDate) 
       results: apiResult.results
     }
   };
+}
+
+function renderRosterDiagnostics(rosterResult) {
+  lastNetworkProbe = {
+    build: BUILD_VERSION,
+    type: "khan-roster-discovery",
+    collectedAt: new Date().toISOString(),
+    ...rosterResult
+  };
+  elements.networkProbe.textContent = JSON.stringify(lastNetworkProbe, null, 2);
+  elements.copyNetworkProbeButton.disabled = false;
 }
 
 function renderCapture(capture) {
@@ -1254,18 +1271,19 @@ async function collectKhanStudentRosterFromPage() {
     return { ok: false, reason: "not a Khan frame", url: location.href, students: [] };
   }
 
-  const before = collectStudents();
+  const before = collectStudents(false);
   const switchControl = findSwitchStudentControl();
+  const switchControlText = switchControl ? describeElement(switchControl) : "";
   if (switchControl) {
     try {
-      switchControl.click();
-      await delay(900);
+      clickElement(switchControl);
+      await waitForRosterMenu(3500);
     } catch {
       // The initial DOM scan may still have enough roster data.
     }
   }
 
-  const after = collectStudents();
+  const after = collectStudents(true);
   try {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   } catch {
@@ -1277,10 +1295,14 @@ async function collectKhanStudentRosterFromPage() {
     url: location.href,
     title: document.title,
     openedSwitchStudent: Boolean(switchControl),
+    switchControlText,
+    beforeCount: before.length,
+    afterCount: after.length,
+    visibleMenuTextSample: collectMenuTextSample(),
     students: dedupe([...before, ...after])
   };
 
-  function collectStudents() {
+  function collectStudents(includeMenu) {
     const students = [];
     const currentKaid = getStudentKaidFromUrl(location.href);
     if (currentKaid) {
@@ -1291,17 +1313,7 @@ async function collectKhanStudentRosterFromPage() {
       });
     }
 
-    const elements = Array.from(document.querySelectorAll([
-      "a[href*='individual-student/kaid_']",
-      "a[href*='kaid_']",
-      "button",
-      "[role='button']",
-      "[role='option']",
-      "[role='menuitem']",
-      "[aria-label]",
-      "[title]",
-      "option"
-    ].join(",")));
+    const elements = includeMenu ? getRosterCandidateElements() : getCurrentReportLinkElements();
 
     for (const element of elements) {
       const sourceText = [
@@ -1314,20 +1326,51 @@ async function collectKhanStudentRosterFromPage() {
       ].filter(Boolean).join(" ");
 
       for (const kaid of findKaids(sourceText)) {
+        const href = element.getAttribute("href") || "";
+        const isReportLink = /individual-student\/kaid_/i.test(href);
+        const isMenuItem = includeMenu && isLikelyRosterMenuItem(element);
+        if (!isReportLink && !isMenuItem) continue;
+
         students.push({
           kaid,
           name: cleanStudentName(element.textContent || element.getAttribute("aria-label") || element.getAttribute("title") || ""),
-          source: element.tagName.toLowerCase()
+          source: isReportLink ? "student-report-link" : "switch-student-menu"
         });
       }
     }
 
-    const html = document.documentElement?.innerHTML || "";
-    for (const kaid of findKaids(html).slice(0, 200)) {
-      students.push({ kaid, name: "", source: "html" });
-    }
-
     return students;
+  }
+
+  function getCurrentReportLinkElements() {
+    return Array.from(document.querySelectorAll("a[href*='individual-student/kaid_']")).filter(isVisible);
+  }
+
+  function getRosterCandidateElements() {
+    return Array.from(document.querySelectorAll([
+      "a[href*='individual-student/kaid_']",
+      "[role='option']",
+      "[role='menuitem']",
+      "[role='menuitemradio']",
+      "[role='listbox'] *",
+      "[role='menu'] *",
+      "[role='dialog'] *",
+      "[aria-label*='student' i]",
+      "[title*='student' i]",
+      "option"
+    ].join(","))).filter(isVisible);
+  }
+
+  function isLikelyRosterMenuItem(element) {
+    const text = compactText([
+      element.textContent,
+      element.getAttribute("aria-label"),
+      element.getAttribute("title")
+    ].filter(Boolean).join(" "));
+    if (!findKaids(text).length && !findKaids(Object.values(element.dataset || {}).join(" ")).length) return false;
+    if (text.length > 180) return false;
+    if (/\b(cooldown|teacher|dashboard|settings|reports?|activity log|date range|exercise|time on task|my classes|assignments|skills|subjects|feedback|search)\b/i.test(text)) return false;
+    return true;
   }
 
   function findSwitchStudentControl() {
@@ -1338,6 +1381,43 @@ async function collectKhanStudentRosterFromPage() {
         element.getAttribute("aria-label"),
         element.getAttribute("title")
       ].filter(Boolean).join(" "))));
+  }
+
+  async function waitForRosterMenu(timeoutMs) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (collectStudents(true).length > collectStudents(false).length) return;
+      await delay(150);
+    }
+  }
+
+  function clickElement(element) {
+    element.scrollIntoView({ block: "center", inline: "center" });
+    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+      element.dispatchEvent(new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        view: window
+      }));
+    }
+    element.click();
+  }
+
+  function describeElement(element) {
+    return compactText([
+      element.tagName,
+      element.textContent,
+      element.getAttribute("aria-label"),
+      element.getAttribute("title")
+    ].filter(Boolean).join(" "));
+  }
+
+  function collectMenuTextSample() {
+    return Array.from(document.querySelectorAll("[role='listbox'],[role='menu'],[role='dialog']"))
+      .filter(isVisible)
+      .map((element) => compactText(element.textContent || ""))
+      .filter(Boolean)
+      .slice(0, 5);
   }
 
   function inferCurrentStudentName() {
