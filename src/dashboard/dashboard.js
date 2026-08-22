@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.10.2";
+const BUILD_VERSION = "0.10.3";
 const STORAGE_KEY = "khanGrader.lastCapture";
 const CLASS_CONFIG_STORAGE_KEY = "khanGrader.classConfigs";
 const SCHOOLOGY_CONFIG_STORAGE_KEY = "khanGrader.schoologyConfig";
@@ -1220,16 +1220,38 @@ async function findOrCreateSchoologyAssignments(classConfigs, schoologyConfig, s
   for (const classConfig of classConfigs) {
     try {
       const assignments = await fetchSchoologyAssignments(classConfig.schoologySectionId, schoologyConfig);
-      const existing = assignments.find((assignment) => compactText(assignment.title) === title);
-      if (existing?.id) {
+      const exactMatches = assignments.filter((assignment) => compactText(assignment.title) === title && assignment?.id);
+      let reusableAssignment = null;
+
+      for (const existing of exactMatches) {
         const verified = await fetchSchoologyAssignment(classConfig.schoologySectionId, existing.id, schoologyConfig);
+        const summary = summarizeSchoologyAssignment(verified);
+        if (isReusableSchoologyAssignment(summary)) {
+          reusableAssignment = {
+            id: String(existing.id),
+            summary
+          };
+          break;
+        }
         rows.push({
           className: classConfig.name || "",
           sectionId: classConfig.schoologySectionId,
           assignmentId: String(existing.id),
           title,
+          status: "skipped",
+          skipReason: "Schoology returned this title, but it is not currently usable.",
+          ...summary
+        });
+      }
+
+      if (reusableAssignment) {
+        rows.push({
+          className: classConfig.name || "",
+          sectionId: classConfig.schoologySectionId,
+          assignmentId: reusableAssignment.id,
+          title,
           status: "found",
-          ...summarizeSchoologyAssignment(verified)
+          ...reusableAssignment.summary
         });
         continue;
       }
@@ -1313,6 +1335,20 @@ function summarizeSchoologyAssignment(assignment) {
     countInGrade: assignment?.count_in_grade ?? "",
     selfLink: assignment?.links?.self || ""
   };
+}
+
+function isReusableSchoologyAssignment(summary) {
+  return isTruthySchoologyFlag(summary.published)
+    && isTruthySchoologyFlag(summary.countInGrade)
+    && !isFalsySchoologyFlag(summary.available);
+}
+
+function isTruthySchoologyFlag(value) {
+  return String(value) === "1" || value === true;
+}
+
+function isFalsySchoologyFlag(value) {
+  return String(value) === "0" || value === false;
 }
 
 function applyAssignmentIdsToClassConfigs(classConfigs, rows) {
@@ -1687,7 +1723,7 @@ function renderAssignmentResults(result) {
       <div>${escapeHtml(row.verifiedTitle || row.title || "")}<div class="source">${escapeHtml(row.due ? `Due ${row.due}` : "")}</div></div>
       <div>${escapeHtml(row.assignmentId || "")}</div>
       <div>${escapeHtml(formatAssignmentVisibility(row))}</div>
-      <div>${escapeHtml(formatAssignmentStatus(row.status))}${row.selfLink ? `<div class="source">${escapeHtml(row.selfLink)}</div>` : ""}${row.error ? `<div class="source">${escapeHtml(row.error)}</div>` : ""}</div>
+      <div>${escapeHtml(formatAssignmentStatus(row.status))}${row.skipReason ? `<div class="source">${escapeHtml(row.skipReason)}</div>` : ""}${row.selfLink ? `<div class="source">${escapeHtml(row.selfLink)}</div>` : ""}${row.error ? `<div class="source">${escapeHtml(row.error)}</div>` : ""}</div>
     `;
     elements.assignmentTable.append(line);
   }
@@ -1712,6 +1748,7 @@ function formatAssignmentStatus(status) {
   return {
     found: "Found existing",
     created: "Created",
+    skipped: "Skipped old match",
     error: "Error"
   }[status] || status || "";
 }
