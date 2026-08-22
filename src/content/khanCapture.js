@@ -17,13 +17,15 @@ function getKhanReport() {
   const selectedText = String(window.getSelection?.() || "");
   const rows = extractKhanRows(pageText);
   const activityRows = extractActivityRows(pageText);
+  const studentSummary = extractStudentSummary(pageText);
 
   return {
     url: location.href,
     title: document.title,
     rows,
     activityRows,
-    pageKind: inferPageKind(pageText, rows, activityRows),
+    studentSummary,
+    pageKind: inferPageKind(pageText, rows, activityRows, studentSummary),
     dateRange: extractDateRange(pageText),
     textSample: pageText.slice(0, 6000),
     selectedTextSample: selectedText.slice(0, 2000),
@@ -34,13 +36,17 @@ function getKhanReport() {
       tableRowCount: document.querySelectorAll("tr").length,
       roleRowCount: document.querySelectorAll('[role="row"]').length,
       iframeCount: document.querySelectorAll("iframe").length,
-      shadowRootCount: countShadowRoots()
+      shadowRootCount: countShadowRoots(),
+      possibleStudentNames: extractPossibleStudentNames(pageText).slice(0, 40)
     }
   };
 }
 
-function inferPageKind(pageText, rows, activityRows) {
+function inferPageKind(pageText, rows, activityRows, studentSummary) {
   const text = String(pageText || "").toLowerCase();
+  if (studentSummary.exerciseMinutes !== null || studentSummary.timeOnTaskMinutes !== null) {
+    return "individual-student-report";
+  }
   if (activityRows.length && /activity|minutes|course|skill|assignment|mastery|practice/.test(text)) {
     return "student-activity";
   }
@@ -61,6 +67,92 @@ function extractDateRange(pageText) {
   }
 
   return lines.find((line) => /^(last \d+ days|last week|this week|today|yesterday|all time)$/i.test(line)) || "";
+}
+
+function extractStudentSummary(pageText) {
+  const lines = getLines(pageText);
+  const studentName = extractStudentName(lines);
+  const exerciseMinutes = findMetricMinutes(lines, /^exercises?$/i, /exercises?/i);
+  const timeOnTaskMinutes = findMetricMinutes(lines, /^time\s*on\s*task$/i, /time\s*on\s*task/i);
+  const detectedDateRange = extractDateRange(pageText);
+
+  return {
+    studentName,
+    exerciseMinutes,
+    timeOnTaskMinutes,
+    detectedDateRange,
+    sourceText: buildStudentSummarySource(lines, studentName)
+  };
+}
+
+function extractStudentName(lines) {
+  const headingName = Array.from(document.querySelectorAll("h1,h2,h3,[role='heading']"))
+    .map((element) => compactText(element.innerText || element.textContent || ""))
+    .find(looksLikeStudentNameForSummary);
+  if (headingName) return headingName;
+
+  const selectedName = Array.from(document.querySelectorAll("[aria-selected='true'], option:checked"))
+    .map((element) => compactText(element.innerText || element.textContent || element.getAttribute("label") || ""))
+    .find(looksLikeStudentNameForSummary);
+  if (selectedName) return selectedName;
+
+  const switchIndex = lines.findIndex((line) => /switch\s*student/i.test(line));
+  if (switchIndex >= 0) {
+    const nearbyBefore = lines.slice(Math.max(0, switchIndex - 5), switchIndex).reverse().find(looksLikeStudentNameForSummary);
+    if (nearbyBefore) return nearbyBefore;
+
+    const nearbyAfter = lines.slice(switchIndex + 1, switchIndex + 8).find(looksLikeStudentNameForSummary);
+    if (nearbyAfter) return nearbyAfter;
+  }
+
+  return extractPossibleStudentNames(lines.join("\n"))[0] || "";
+}
+
+function extractPossibleStudentNames(pageText) {
+  const lines = getLines(pageText);
+  const names = [];
+  for (const line of lines) {
+    if (looksLikeStudentNameForSummary(line) && !names.includes(line)) names.push(line);
+  }
+  return names;
+}
+
+function findMetricMinutes(lines, exactLabelPattern, looseLabelPattern) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!looseLabelPattern.test(line)) continue;
+
+    const sameLine = parseMinutes(line);
+    if (sameLine !== null && !exactLabelPattern.test(line)) return sameLine;
+
+    for (let offset = 1; offset <= 5 && index + offset < lines.length; offset += 1) {
+      if (isReportLabel(lines[index + offset]) && parseMinutes(lines[index + offset]) === null) break;
+      const minutes = parseMinutes(lines[index + offset]);
+      if (minutes !== null) return minutes;
+    }
+  }
+
+  const joined = lines.join(" | ");
+  const compact = exactLabelPattern.source.includes("time")
+    ? joined.match(/time\s*on\s*task\s*(?:[-:|]|—)?\s*(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m)\b/i)
+    : joined.match(/exercises?\s*(?:[-:|]|—)?\s*(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m)\b/i);
+  return compact ? Math.round(Number(compact[1])) : null;
+}
+
+function buildStudentSummarySource(lines, studentName) {
+  const interesting = lines.filter((line) => {
+    if (studentName && line === studentName) return true;
+    return /switch\s*student|last\s*\d+\s*days|date\s*range|activity\s*filter|exercises?|time\s*on\s*task/i.test(line);
+  });
+  return interesting.slice(0, 20).join(" | ");
+}
+
+function looksLikeStudentNameForSummary(value) {
+  const line = compactText(value);
+  if (line.length < 3 || line.length > 70) return false;
+  if (!/[a-z]/i.test(line)) return false;
+  if (/\d/.test(line)) return false;
+  return !/\b(report|individual|activity|student|switch|date|filter|exercises?|time on task|minutes?|class|teacher|dashboard|course|skill|assignment|progress|overview|settings|search|subjects|last|days|all time|log)\b/i.test(line);
 }
 
 function extractKhanRows(pageText) {

@@ -1,17 +1,18 @@
 # Khan Grader
 
-Khan Grader is a Manifest V3 Chrome extension for capturing student learning minutes from a Khan Academy teacher Activity Report.
+Khan Grader is a Manifest V3 Chrome extension for capturing student minutes from Khan Academy's Individual Student Report.
 
 This first version is intentionally Khan-only. It does not connect to Schoology, Infinite Campus, or any outside server.
 
 ## Current workflow
 
-1. Open your Khan Academy teacher Activity Report.
-2. Set the Khan date range in Khan.
-3. Open the Khan Grader extension dashboard.
-4. Click **Capture Current Khan Tab**.
-5. Review the detected students, minutes, Khan date range, and diagnostics.
-6. Export CSV if needed.
+1. Open Khan Academy.
+2. Go to Reports -> Individual Student Report -> Activity log.
+3. Choose the student and date range in Khan.
+4. Open the Khan Grader extension dashboard.
+5. Click **Capture Current Student**.
+6. Review the detected student name, Exercises minutes, Time on task minutes, Khan date range, and diagnostics.
+7. Export CSV if needed.
 
 ## Privacy
 
@@ -22,4 +23,4 @@ This first version is intentionally Khan-only. It does not connect to Schoology,
 
 ## Status
 
-This is a capture proof of concept. The main goal is to reliably read the visible Khan Activity Report, including reports rendered inside Khan's embedded frames.
+This is a capture proof of concept. The main goal is to reliably read the visible Individual Student Report before automating student switching.

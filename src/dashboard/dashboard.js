@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.2.0";
+const BUILD_VERSION = "0.3.0";
 const STORAGE_KEY = "khanGrader.lastCapture";
 
 const elements = {};
@@ -23,7 +23,7 @@ async function init() {
   if (stored[STORAGE_KEY]) {
     lastCapture = stored[STORAGE_KEY];
     renderCapture(lastCapture);
-    setStatus(`Loaded previous capture with ${lastCapture.rows.length} row(s).`);
+    setStatus("Loaded previous capture.");
   }
 }
 
@@ -58,10 +58,12 @@ async function captureCurrentTab() {
     await chrome.storage.local.set({ [STORAGE_KEY]: lastCapture });
     renderCapture(lastCapture);
 
-    if (lastCapture.rows.length || lastCapture.activityRows.length) {
-      setStatus(`Captured ${lastCapture.rows.length} total row(s) and ${lastCapture.activityRows.length} activity row(s). Khan page type: ${lastCapture.pageKind}.`);
+    if (hasStudentSummary(lastCapture.studentSummary)) {
+      setStatus(`Captured ${lastCapture.studentSummary.studentName || "current student"}: ${formatMinutes(lastCapture.studentSummary.exerciseMinutes)} exercises, ${formatMinutes(lastCapture.studentSummary.timeOnTaskMinutes)} time on task.`);
+    } else if (lastCapture.rows.length || lastCapture.activityRows.length) {
+      setStatus(`Captured fallback data: ${lastCapture.rows.length} total row(s) and ${lastCapture.activityRows.length} activity row(s). Khan page type: ${lastCapture.pageKind}.`);
     } else {
-      setError("Khan was readable, but no total rows or activity rows were found. Check Diagnostics and make sure the activity information is visible.");
+      setError("Khan was readable, but the Individual Student Report metrics were not found. Copy Diagnostics after confirming Exercises and Time on task are visible.");
     }
   } catch (error) {
     setError(error.message || String(error));
@@ -106,7 +108,7 @@ async function readKhanTab(tab) {
 
   const bestReport = frameReports
     .slice()
-    .sort((a, b) => ((b.activityRows?.length || 0) + (b.rows?.length || 0)) - ((a.activityRows?.length || 0) + (a.rows?.length || 0)))[0];
+    .sort((a, b) => scoreReport(b) - scoreReport(a))[0];
 
   return {
     pageUrl: tab.url,
@@ -115,6 +117,7 @@ async function readKhanTab(tab) {
     bestFrameTitle: bestReport.title,
     pageKind: bestReport.pageKind || "unknown",
     dateRange: bestReport.dateRange || "",
+    studentSummary: bestReport.studentSummary || emptyStudentSummary(),
     rows: dedupeRows(frameReports.flatMap((report) => report.rows || [])),
     activityRows: dedupeActivityRows(frameReports.flatMap((report) => report.activityRows || [])),
     frameReports: frameReports.map((report) => ({
@@ -123,6 +126,7 @@ async function readKhanTab(tab) {
       title: report.title,
       rowCount: report.rows?.length || 0,
       activityRowCount: report.activityRows?.length || 0,
+      studentSummary: report.studentSummary || emptyStudentSummary(),
       pageKind: report.pageKind || "unknown",
       dateRange: report.dateRange || "",
       diagnostics: report.diagnostics,
@@ -132,17 +136,56 @@ async function readKhanTab(tab) {
 }
 
 function renderCapture(capture) {
-  elements.rowCount.textContent = String(capture.rows.length);
-  elements.activityRowCount.textContent = String(capture.activityRows?.length || 0);
+  const studentSummary = capture.studentSummary || emptyStudentSummary();
+  elements.studentName.textContent = studentSummary.studentName || "Not detected";
+  elements.exerciseMinutes.textContent = formatMinutes(studentSummary.exerciseMinutes);
+  elements.timeOnTaskMinutes.textContent = formatMinutes(studentSummary.timeOnTaskMinutes);
   elements.dateRange.textContent = capture.dateRange || "Not detected";
   elements.bestFrame.textContent = capture.bestFrameUrl || "Not detected";
 
-  elements.downloadButton.disabled = capture.rows.length === 0 && (capture.activityRows?.length || 0) === 0;
+  elements.downloadButton.disabled = !hasStudentSummary(studentSummary) && capture.rows.length === 0 && (capture.activityRows?.length || 0) === 0;
   elements.copyDiagnosticsButton.disabled = false;
 
+  renderStudentSummary(studentSummary);
   renderTable(capture.rows);
   renderActivityTable(capture.activityRows || []);
   elements.diagnostics.textContent = formatDiagnostics(capture);
+}
+
+function scoreReport(report) {
+  let score = 0;
+  if (hasStudentSummary(report.studentSummary)) score += 100;
+  if (report.studentSummary?.studentName) score += 10;
+  if (report.studentSummary?.exerciseMinutes !== null) score += 20;
+  if (report.studentSummary?.timeOnTaskMinutes !== null) score += 20;
+  score += report.activityRows?.length || 0;
+  score += report.rows?.length || 0;
+  return score;
+}
+
+function renderStudentSummary(summary) {
+  elements.studentSummaryTable.className = hasStudentSummary(summary) ? "table" : "table empty";
+  elements.studentSummaryTable.innerHTML = "";
+
+  if (!hasStudentSummary(summary)) {
+    elements.studentSummaryTable.textContent = "No Individual Student Report metrics captured.";
+    return;
+  }
+
+  const header = document.createElement("div");
+  header.className = "row student-report header";
+  header.innerHTML = "<div>Student</div><div>Exercises</div><div>Time on task</div><div>Date range</div>";
+  elements.studentSummaryTable.append(header);
+
+  const line = document.createElement("div");
+  line.className = "row student-report";
+  line.innerHTML = `
+    <div>${escapeHtml(summary.studentName || "Not detected")}</div>
+    <div>${escapeHtml(formatMinutes(summary.exerciseMinutes))}</div>
+    <div>${escapeHtml(formatMinutes(summary.timeOnTaskMinutes))}</div>
+    <div>${escapeHtml(summary.detectedDateRange || "Not detected")}</div>
+  `;
+  elements.studentSummaryTable.append(line);
 }
 
 function renderTable(rows) {
@@ -210,6 +253,7 @@ function formatDiagnostics(capture) {
     bestFrameTitle: capture.bestFrameTitle,
     pageKind: capture.pageKind,
     detectedDateRange: capture.dateRange,
+    studentSummary: capture.studentSummary || emptyStudentSummary(),
     rowCount: capture.rows.length,
     activityRowCount: capture.activityRows?.length || 0,
     activityRows: capture.activityRows || [],
@@ -228,7 +272,21 @@ function downloadCsv() {
   if (!lastCapture) return;
 
   const activityRows = lastCapture.activityRows || [];
-  const csv = activityRows.length
+  const studentSummary = lastCapture.studentSummary || emptyStudentSummary();
+  const csv = hasStudentSummary(studentSummary)
+    ? [
+      "Expected Week Start,Expected Week End,Khan Date Range,Student,Exercise Minutes,Time On Task Minutes,Source",
+      [
+        lastCapture.expectedWeekStart,
+        lastCapture.expectedWeekEnd,
+        studentSummary.detectedDateRange || lastCapture.dateRange,
+        studentSummary.studentName,
+        studentSummary.exerciseMinutes ?? "",
+        studentSummary.timeOnTaskMinutes ?? "",
+        studentSummary.sourceText || ""
+      ].map(csvCell).join(",")
+    ].join("\n")
+    : activityRows.length
     ? [
       "Expected Week Start,Expected Week End,Khan Date Range,Date,Activity,Minutes,Source",
       ...activityRows.map((row) => [
@@ -260,6 +318,28 @@ function downloadCsv() {
   link.download = `khan-minutes-${lastCapture.expectedWeekStart || "capture"}.csv`;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function hasStudentSummary(summary) {
+  return Boolean(summary && (
+    summary.studentName ||
+    summary.exerciseMinutes !== null ||
+    summary.timeOnTaskMinutes !== null
+  ));
+}
+
+function emptyStudentSummary() {
+  return {
+    studentName: "",
+    exerciseMinutes: null,
+    timeOnTaskMinutes: null,
+    detectedDateRange: "",
+    sourceText: ""
+  };
+}
+
+function formatMinutes(value) {
+  return value === null || value === undefined || value === "" ? "Not detected" : `${value} min`;
 }
 
 function dedupeActivityRows(rows) {

@@ -11,9 +11,9 @@
       <header class="topbar">
         <div>
           <h1>Khan Grader</h1>
-          <p>Capture Khan Academy class totals or student activity details.</p>
+          <p>Capture Khan Academy Individual Student Report minutes.</p>
         </div>
-        <span id="build">v0.2.0</span>
+        <span id="build">v0.3.0</span>
       </header>
 
       <section class="panel controls">
@@ -25,20 +25,24 @@
           Expected week end
           <input id="weekEnd" type="date">
         </label>
-        <button id="captureButton" type="button">Capture Current Khan Tab</button>
+        <button id="captureButton" type="button">Capture Current Student</button>
         <button id="openKhanButton" class="secondary" type="button">Open Khan Reports</button>
       </section>
 
-      <p id="status" class="status">Open a Khan Activity Report tab, set the Khan date range, then capture.</p>
+      <p id="status" class="status">Open Khan Reports -> Individual Student Report -> Activity log, set the date range, then capture.</p>
 
       <section class="summary-grid">
         <article>
-          <span>Total rows</span>
-          <strong id="rowCount">0</strong>
+          <span>Student</span>
+          <strong id="studentName">Not captured</strong>
         </article>
         <article>
-          <span>Activity rows</span>
-          <strong id="activityRowCount">0</strong>
+          <span>Exercises</span>
+          <strong id="exerciseMinutes">Not captured</strong>
+        </article>
+        <article>
+          <span>Time on task</span>
+          <strong id="timeOnTaskMinutes">Not captured</strong>
         </article>
         <article>
           <span>Khan date range</span>
@@ -52,17 +56,24 @@
 
       <section class="panel">
         <div class="section-header">
-          <h2>Captured Totals</h2>
+          <h2>Individual Student Report</h2>
           <button id="downloadButton" class="secondary" type="button" disabled>Download CSV</button>
         </div>
-        <div id="table" class="table empty">No rows captured yet.</div>
+        <div id="studentSummaryTable" class="table empty">No student report captured yet.</div>
       </section>
 
       <section class="panel">
         <div class="section-header">
-          <h2>Captured Activity Details</h2>
+          <h2>Activity Details</h2>
         </div>
         <div id="activityTable" class="table empty">No activity details captured yet.</div>
+      </section>
+
+      <section class="panel">
+        <div class="section-header">
+          <h2>Fallback Total Rows</h2>
+        </div>
+        <div id="table" class="table empty">No fallback total rows captured yet.</div>
       </section>
 
       <section class="panel">
