@@ -13,7 +13,7 @@
           <h1>Khan Grader</h1>
           <p>Capture Khan Academy class or student activity minutes.</p>
         </div>
-        <span id="build">v0.9.0</span>
+        <span id="build">v0.9.1</span>
       </header>
 
       <section class="panel controls">
@@ -106,6 +106,7 @@
           <div class="button-row">
             <button id="saveSchoologyButton" class="secondary" type="button">Save Settings</button>
             <button id="previewSchoologyButton" type="button">Preview Schoology Grades</button>
+            <button id="previewSchoologyTestButton" class="secondary" type="button">Preview Test Grades</button>
             <button id="sendSchoologyButton" type="button">Send Grades to Schoology</button>
           </div>
         </div>
@@ -124,6 +125,10 @@
           <label>
             Max points
             <input id="gradeMaxPoints" type="number" min="1" step="1" value="100">
+          </label>
+          <label>
+            Test minutes
+            <input id="schoologyTestMinutes" type="number" min="0" step="1" value="50">
           </label>
           <label>
             API base

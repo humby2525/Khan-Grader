@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.9.0";
+const BUILD_VERSION = "0.9.1";
 const STORAGE_KEY = "khanGrader.lastCapture";
 const CLASS_CONFIG_STORAGE_KEY = "khanGrader.classConfigs";
 const SCHOOLOGY_CONFIG_STORAGE_KEY = "khanGrader.schoologyConfig";
@@ -26,6 +26,7 @@ async function init() {
   elements.saveClassesButton.addEventListener("click", saveClassConfigs);
   elements.saveSchoologyButton.addEventListener("click", saveSchoologyConfig);
   elements.previewSchoologyButton.addEventListener("click", previewSchoologyGrades);
+  elements.previewSchoologyTestButton.addEventListener("click", previewSchoologyTestGrades);
   elements.sendSchoologyButton.addEventListener("click", sendSchoologyGrades);
   elements.downloadButton.addEventListener("click", downloadCsv);
   elements.copyDiagnosticsButton.addEventListener("click", copyDiagnostics);
@@ -87,6 +88,7 @@ function loadSchoologyConfig(config) {
   elements.gradeMetric.value = config.gradeMetric || "timeOnTaskMinutes";
   elements.gradeTargetMinutes.value = config.gradeTargetMinutes || 50;
   elements.gradeMaxPoints.value = config.gradeMaxPoints || 100;
+  elements.schoologyTestMinutes.value = config.testMinutes ?? 50;
   elements.schoologyApiBase.value = config.apiBase || "https://api.schoology.com/v1";
   elements.schoologyConsumerKey.value = config.consumerKey || "";
   elements.schoologyConsumerSecret.value = config.consumerSecret || "";
@@ -97,6 +99,7 @@ function readSchoologyConfig() {
     gradeMetric: elements.gradeMetric.value || "timeOnTaskMinutes",
     gradeTargetMinutes: Number(elements.gradeTargetMinutes.value || 50),
     gradeMaxPoints: Number(elements.gradeMaxPoints.value || 100),
+    testMinutes: Number(elements.schoologyTestMinutes.value || 0),
     apiBase: compactText(elements.schoologyApiBase.value) || "https://api.schoology.com/v1",
     consumerKey: compactText(elements.schoologyConsumerKey.value),
     consumerSecret: compactText(elements.schoologyConsumerSecret.value)
@@ -1012,6 +1015,44 @@ async function previewSchoologyGrades() {
   }
 }
 
+async function previewSchoologyTestGrades() {
+  const schoologyConfig = readSchoologyConfig();
+  const validation = validateSchoologyConfig(schoologyConfig);
+  if (validation) {
+    setError(validation);
+    return;
+  }
+
+  const classConfigs = readClassConfigs();
+  const missingSection = classConfigs.find((config) => !config.schoologySectionId);
+  if (!classConfigs.length || missingSection) {
+    setError("Add a Schoology section ID for each class you want to test.");
+    return;
+  }
+
+  await chrome.storage.local.set({
+    [CLASS_CONFIG_STORAGE_KEY]: classConfigs,
+    [SCHOOLOGY_CONFIG_STORAGE_KEY]: schoologyConfig
+  });
+
+  const previousDisabled = setCaptureButtonsDisabled(true);
+  try {
+    setStatus("Loading Schoology roster test rows...");
+    lastSchoologyPreview = await buildSchoologyRosterTestPreview(classConfigs, schoologyConfig);
+    renderSchoologyPreview(lastSchoologyPreview);
+
+    const readyCount = lastSchoologyPreview.rows.filter((row) => row.status === "ready").length;
+    const issueCount = lastSchoologyPreview.rows.length - readyCount;
+    setStatus(issueCount
+      ? `Test preview ready: ${readyCount} grade(s) ready, ${issueCount} row(s) need an assignment ID.`
+      : `Test preview ready: ${readyCount} Schoology roster grade(s). Use a test assignment before sending.`);
+  } catch (error) {
+    setError(error.message || String(error));
+  } finally {
+    restoreCaptureButtonsDisabled(previousDisabled);
+  }
+}
+
 async function sendSchoologyGrades() {
   const schoologyConfig = readSchoologyConfig();
   const validation = validateSchoologyConfig(schoologyConfig);
@@ -1031,7 +1072,10 @@ async function sendSchoologyGrades() {
     return;
   }
 
-  const confirmed = window.confirm(`Send ${readyRows.length} Khan grade(s) to Schoology? This will update the selected assignment grade(s).`);
+  const isTestPreview = Boolean(lastSchoologyPreview.testMode);
+  const confirmed = window.confirm(isTestPreview
+    ? `Send ${readyRows.length} TEST grade(s) to Schoology? Use this only with a test assignment.`
+    : `Send ${readyRows.length} Khan grade(s) to Schoology? This will update the selected assignment grade(s).`);
   if (!confirmed) {
     setStatus("Schoology send canceled.");
     return;
@@ -1047,7 +1091,7 @@ async function sendSchoologyGrades() {
     const errorCount = lastSchoologyPreview.rows.filter((row) => row.status === "send_error").length;
     setStatus(errorCount
       ? `Sent ${sentCount} grade(s); ${errorCount} row(s) failed. Check the preview table.`
-      : `Sent ${sentCount} grade(s) to Schoology.`);
+      : `Sent ${sentCount}${isTestPreview ? " test" : ""} grade(s) to Schoology.`);
   } catch (error) {
     setError(error.message || String(error));
   } finally {
@@ -1107,6 +1151,53 @@ async function buildSchoologyPreview(students, classConfigs, schoologyConfig) {
         enrollmentId: enrollment.id
       };
     })
+  };
+}
+
+async function buildSchoologyRosterTestPreview(classConfigs, schoologyConfig) {
+  const grading = {
+    metric: schoologyConfig.gradeMetric,
+    metricLabel: "Test minutes",
+    targetMinutes: schoologyConfig.gradeTargetMinutes,
+    maxPoints: schoologyConfig.gradeMaxPoints
+  };
+  const rows = [];
+
+  for (const classConfig of classConfigs) {
+    if (!classConfig.schoologySectionId) continue;
+    const enrollments = await fetchSchoologyEnrollments(classConfig.schoologySectionId, schoologyConfig);
+    for (const enrollment of enrollments) {
+      const name = schoologyEnrollmentName(enrollment);
+      const enrollmentId = String(enrollment?.id || "").trim();
+      if (!name || !enrollmentId) continue;
+
+      const minutes = Number(schoologyConfig.testMinutes || 0);
+      const grade = calculateGrade(minutes, grading.targetMinutes, grading.maxPoints);
+      rows.push({
+        className: classConfig.name || "",
+        studentName: name,
+        schoologyName: name,
+        sectionId: classConfig.schoologySectionId || "",
+        assignmentId: classConfig.schoologyAssignmentId || "",
+        enrollmentId,
+        metricMinutes: minutes,
+        grade,
+        dateRange: "Schoology roster test",
+        status: classConfig.schoologyAssignmentId ? "ready" : "missing_assignment",
+        testMode: true,
+        comment: `TEST Khan Grader: ${minutes} min; target ${grading.targetMinutes} min`
+      });
+    }
+  }
+
+  return {
+    build: BUILD_VERSION,
+    createdAt: new Date().toISOString(),
+    testMode: true,
+    expectedWeekStart: "",
+    expectedWeekEnd: "",
+    grading,
+    rows
   };
 }
 
@@ -1327,6 +1418,7 @@ function normalizeArray(value) {
 function validateSchoologyConfig(config) {
   if (!Number.isFinite(config.gradeTargetMinutes) || config.gradeTargetMinutes <= 0) return "Required minutes must be greater than zero.";
   if (!Number.isFinite(config.gradeMaxPoints) || config.gradeMaxPoints <= 0) return "Max points must be greater than zero.";
+  if (!Number.isFinite(config.testMinutes) || config.testMinutes < 0) return "Test minutes must be zero or greater.";
   try {
     const url = new URL(config.apiBase);
     if (!/^https:$/i.test(url.protocol)) return "Schoology API base must start with https://.";
@@ -1349,7 +1441,7 @@ function renderSchoologyPreview(preview) {
 
   const header = document.createElement("div");
   header.className = "row schoology-preview header";
-  header.innerHTML = "<div>Class</div><div>Khan student</div><div>Schoology match</div><div>Minutes</div><div>Grade</div><div>Status</div>";
+  header.innerHTML = `<div>Class</div><div>${preview?.testMode ? "Schoology student" : "Khan student"}</div><div>Schoology match</div><div>Minutes</div><div>Grade</div><div>Status</div>`;
   elements.schoologyPreviewTable.append(header);
 
   for (const row of rows) {
@@ -1374,7 +1466,8 @@ function formatPreviewStatus(status) {
     missing_section: "Missing section ID",
     missing_assignment: "Missing assignment ID",
     no_match: "No Schoology match",
-    send_error: "Send error"
+    send_error: "Send error",
+    test_ready: "Test ready"
   }[status] || status || "";
 }
 
@@ -1585,6 +1678,7 @@ function setCaptureButtonsDisabled(disabled) {
     elements.saveClassesButton,
     elements.saveSchoologyButton,
     elements.previewSchoologyButton,
+    elements.previewSchoologyTestButton,
     elements.sendSchoologyButton
   ].filter(Boolean);
   const previous = buttons.map((button) => ({ button, disabled: button.disabled }));

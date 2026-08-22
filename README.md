@@ -80,6 +80,19 @@ grade = min(max points, round(minutes / required minutes * max points))
 
 The first Schoology version uses existing assignment IDs. It does not create Schoology assignments automatically.
 
+## Schoology-only test mode
+
+Use this when Schoology has the current roster but Khan does not yet.
+
+1. Create or choose a temporary test assignment in Schoology.
+2. Put that test assignment ID in each saved class row.
+3. Enter a fake value in **Test minutes**.
+4. Click **Preview Test Grades**.
+5. Confirm that the roster names, enrollment IDs, and calculated grades look right.
+6. Click **Send Grades to Schoology** only if the assignment ID is a test assignment.
+
+This test mode does not use Khan data. It pulls active member enrollments from Schoology, calculates grades from the fake test minutes value, and writes comments beginning with `TEST Khan Grader`.
+
 ## Network probe
 
 Use the network probe to test whether Khan sends report dates in its own request data.
