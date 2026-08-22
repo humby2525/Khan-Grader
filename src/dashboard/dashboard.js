@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.12.0";
+const BUILD_VERSION = "0.12.1";
 const DEFAULT_ASSIGNMENT_TITLE_TEMPLATE = "Khan Minutes - Week of {startDate}";
 const LEGACY_ASSIGNMENT_TITLE_TEMPLATE = "Khan Active Minutes - Week of {startDate}";
 const STORAGE_KEY = "khanGrader.lastCapture";
@@ -28,6 +28,7 @@ async function init() {
   elements.saveClassesButton.addEventListener("click", saveClassConfigs);
   elements.saveSchoologyButton.addEventListener("click", saveSchoologyConfig);
   elements.loadSchoologyOptionsButton.addEventListener("click", loadSchoologyAssignmentOptions);
+  elements.readSchoologyPageOptionsButton.addEventListener("click", readSchoologyPageDropdowns);
   elements.prepareAssignmentsButton.addEventListener("click", prepareSchoologyAssignments);
   elements.previewSchoologyButton.addEventListener("click", previewSchoologyGrades);
   elements.previewSchoologyTestButton.addEventListener("click", previewSchoologyTestGrades);
@@ -35,6 +36,8 @@ async function init() {
   elements.downloadButton.addEventListener("click", downloadCsv);
   elements.copyDiagnosticsButton.addEventListener("click", copyDiagnostics);
   elements.copyNetworkProbeButton.addEventListener("click", copyNetworkProbe);
+  elements.assignmentPeriodName.addEventListener("change", () => syncSelectFallbackId(elements.assignmentPeriodName, elements.assignmentPeriodId));
+  elements.assignmentGradingTaskName.addEventListener("change", () => syncSelectFallbackId(elements.assignmentGradingTaskName, elements.assignmentGradingTaskId));
 
   setDefaultWeek();
 
@@ -210,6 +213,67 @@ async function loadSchoologyAssignmentOptions() {
     setStatus(`Loaded ${categoryTitles} categor${categoryTitles === 1 ? "y" : "ies"}, ${periodTitles} period${periodTitles === 1 ? "" : "s"}, and ${taskTitles} grading task${taskTitles === 1 ? "" : "s"} from ${sections.length} section(s).`);
   } catch (error) {
     setError(error.message || String(error));
+  } finally {
+    restoreCaptureButtonsDisabled(previousDisabled);
+  }
+}
+
+async function readSchoologyPageDropdowns() {
+  const tab = await findSchoologyTab();
+  if (!tab?.id) {
+    setError("Open a Schoology assignment create or edit page, then click Read Schoology Page Dropdowns again.");
+    return;
+  }
+
+  const schoologyConfig = readSchoologyConfig();
+  await chrome.storage.local.set({ [SCHOOLOGY_CONFIG_STORAGE_KEY]: schoologyConfig });
+
+  const previousDisabled = setCaptureButtonsDisabled(true);
+  try {
+    setStatus("Reading dropdowns from the open Schoology assignment page...");
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      func: collectSchoologyAssignmentDropdowns
+    });
+    const pageOptions = mergeSchoologyPageDropdownResults(results);
+    const categoryRows = pageOptions.controls.category?.options || [];
+    const periodRows = pageOptions.controls.period?.options || [];
+    const taskRows = pageOptions.controls.gradingTask?.options || [];
+
+    if (!categoryRows.length && !periodRows.length && !taskRows.length) {
+      setError("No assignment category, grading task, or period dropdowns were found on the open Schoology page. Open the full assignment create/edit page and try again.");
+      lastNetworkProbe = {
+        build: BUILD_VERSION,
+        type: "schoology-page-dropdowns-empty",
+        tabUrl: tab.url || "",
+        pageOptions
+      };
+      elements.networkProbe.textContent = JSON.stringify(lastNetworkProbe, null, 2);
+      elements.copyNetworkProbeButton.disabled = false;
+      return;
+    }
+
+    mergeSchoologyNameSelectOptions(elements.assignmentCategoryName, categoryRows);
+    mergeSchoologyNameSelectOptions(elements.assignmentPeriodName, periodRows);
+    mergeSchoologyNameSelectOptions(elements.assignmentGradingTaskName, taskRows);
+    applySchoologyPageSelectedOption(elements.assignmentCategoryName, pageOptions.controls.category);
+    applySchoologyPageSelectedOption(elements.assignmentPeriodName, pageOptions.controls.period);
+    applySchoologyPageSelectedOption(elements.assignmentGradingTaskName, pageOptions.controls.gradingTask);
+    syncSelectFallbackId(elements.assignmentPeriodName, elements.assignmentPeriodId);
+    syncSelectFallbackId(elements.assignmentGradingTaskName, elements.assignmentGradingTaskId);
+
+    lastNetworkProbe = {
+      build: BUILD_VERSION,
+      type: "schoology-page-dropdowns",
+      tabId: tab.id,
+      tabUrl: tab.url || "",
+      ...pageOptions
+    };
+    elements.networkProbe.textContent = JSON.stringify(lastNetworkProbe, null, 2);
+    elements.copyNetworkProbeButton.disabled = false;
+    setStatus(`Read ${categoryRows.length} categor${categoryRows.length === 1 ? "y" : "ies"}, ${taskRows.length} grading task${taskRows.length === 1 ? "" : "s"}, and ${periodRows.length} period${periodRows.length === 1 ? "" : "s"} from the Schoology page.`);
+  } catch (error) {
+    setError(`Could not read the Schoology page dropdowns: ${error.message || String(error)}`);
   } finally {
     restoreCaptureButtonsDisabled(previousDisabled);
   }
@@ -530,6 +594,109 @@ async function findKhanTab() {
 
 function isKhanTab(tab) {
   return Boolean(tab?.id && /khanacademy\.org/i.test(tab.url || ""));
+}
+
+async function findSchoologyTab() {
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (isSchoologyTab(activeTab)) return activeTab;
+
+  const tabs = await chrome.tabs.query({ currentWindow: true });
+  return tabs
+    .filter(isSchoologyTab)
+    .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0] || null;
+}
+
+function isSchoologyTab(tab) {
+  return Boolean(tab?.id && /^https:\/\/[^/]*schoology\.com\//i.test(tab.url || ""));
+}
+
+function collectSchoologyAssignmentDropdowns() {
+  function text(value) {
+    return String(value || "").replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ").trim();
+  }
+
+  function cssEscape(value) {
+    if (globalThis.CSS?.escape) return globalThis.CSS.escape(value);
+    return String(value || "").replace(/"/g, '\\"');
+  }
+
+  function nodeText(node) {
+    return text(node?.textContent || "");
+  }
+
+  function labelFor(select) {
+    if (select.id) {
+      const explicit = document.querySelector(`label[for="${cssEscape(select.id)}"]`);
+      if (explicit) return nodeText(explicit);
+    }
+    const wrapper = select.closest("label");
+    if (wrapper) return nodeText(wrapper).replace(nodeText(select), "").trim();
+    return "";
+  }
+
+  function nearbyText(select) {
+    const container = select.closest("tr, li, .form-item, .form-row, .field, div");
+    if (!container) return "";
+    const clone = container.cloneNode(true);
+    for (const nested of clone.querySelectorAll("select, input, textarea, option, script, style")) nested.remove();
+    return nodeText(clone).slice(0, 240);
+  }
+
+  function classifySelect(select, label, context) {
+    const combined = `${label} ${context}`.toLowerCase();
+    const nameId = `${select.id || ""} ${select.name || ""}`.toLowerCase();
+    if (/grading[\s_-]*task|task[\s_-]*id|gradingtask/.test(combined) || /grading[\s_-]*task|task[\s_-]*id|gradingtask/.test(nameId)) return "gradingTask";
+    if (/categor/.test(combined) || /grading[\s_-]*category|category/.test(nameId)) return "category";
+    if (/grading[\s_-]*period|marking[\s_-]*period|\bperiod\b/.test(combined) || /grading[\s_-]*period|period/.test(nameId)) return "period";
+    return "";
+  }
+
+  function optionRows(select) {
+    return Array.from(select.options || [])
+      .map((option, index) => ({
+        id: text(option.value),
+        title: text(option.textContent || option.label),
+        selected: Boolean(option.selected),
+        disabled: Boolean(option.disabled),
+        index
+      }))
+      .filter((option) => option.title);
+  }
+
+  const controls = {};
+  const selects = Array.from(document.querySelectorAll("select")).map((select, index) => {
+    const label = labelFor(select);
+    const context = text([
+      select.id,
+      select.name,
+      select.getAttribute("aria-label"),
+      select.getAttribute("title"),
+      label,
+      nearbyText(select)
+    ].filter(Boolean).join(" "));
+    const kind = classifySelect(select, label, context);
+    const info = {
+      index,
+      kind,
+      id: select.id || "",
+      name: select.name || "",
+      label,
+      context,
+      options: optionRows(select)
+    };
+    if (kind && (!controls[kind] || info.options.length > controls[kind].options.length)) {
+      controls[kind] = info;
+    }
+    return info;
+  });
+
+  return {
+    url: location.href,
+    title: document.title,
+    controls,
+    selectCount: selects.length,
+    selects
+  };
 }
 
 async function readKhanTab(tab) {
@@ -1447,26 +1614,38 @@ async function resolveSchoologyPeriodId(classConfig, schoologyConfig) {
   const periodName = compactText(schoologyConfig.assignmentPeriodName);
   if (!periodName) return compactText(schoologyConfig.assignmentPeriodId);
 
-  const periods = await fetchSchoologyGradingPeriods(classConfig.schoologySectionId, schoologyConfig);
-  const match = findSchoologyOptionByTitle(periods, periodName);
-  if (!match?.id) {
+  try {
+    const periods = await fetchSchoologyGradingPeriods(classConfig.schoologySectionId, schoologyConfig);
+    const match = findSchoologyOptionByTitle(periods, periodName);
+    if (match?.id) return String(match.id);
+    const fallbackId = compactText(schoologyConfig.assignmentPeriodId);
+    if (fallbackId) return fallbackId;
     const available = formatAvailableSchoologyOptionTitles(periods);
     throw new Error(`Could not find grading period "${periodName}" for ${classConfig.name || `section ${classConfig.schoologySectionId}`}.${available ? ` Available periods: ${available}` : ""}`);
+  } catch (error) {
+    const fallbackId = compactText(schoologyConfig.assignmentPeriodId);
+    if (fallbackId) return fallbackId;
+    throw error;
   }
-  return String(match.id);
 }
 
 async function resolveSchoologyGradingTaskId(classConfig, schoologyConfig) {
   const taskName = compactText(schoologyConfig.assignmentGradingTaskName);
   if (!taskName) return compactText(schoologyConfig.assignmentGradingTaskId);
 
-  const tasks = await fetchSchoologyGradingTasks(classConfig.schoologySectionId, schoologyConfig);
-  const match = findSchoologyOptionByTitle(tasks, taskName);
-  if (!match?.id) {
+  try {
+    const tasks = await fetchSchoologyGradingTasks(classConfig.schoologySectionId, schoologyConfig);
+    const match = findSchoologyOptionByTitle(tasks, taskName);
+    if (match?.id) return String(match.id);
+    const fallbackId = compactText(schoologyConfig.assignmentGradingTaskId);
+    if (fallbackId) return fallbackId;
     const available = formatAvailableSchoologyOptionTitles(tasks);
     throw new Error(`Could not find grading task "${taskName}" for ${classConfig.name || `section ${classConfig.schoologySectionId}`}.${available ? ` Available tasks: ${available}` : ""}`);
+  } catch (error) {
+    const fallbackId = compactText(schoologyConfig.assignmentGradingTaskId);
+    if (fallbackId) return fallbackId;
+    throw error;
   }
-  return String(match.id);
 }
 
 async function createSchoologyAssignment(classConfig, schoologyConfig, title, due, expectedAssignmentFields) {
@@ -1836,24 +2015,70 @@ function normalizeSchoologyCollection(json, keys) {
   return [];
 }
 
+function mergeSchoologyPageDropdownResults(results) {
+  const frames = (results || [])
+    .map((item, index) => ({
+      frameIndex: index + 1,
+      ...(item.result || {})
+    }))
+    .filter((frame) => frame.url || frame.selectCount);
+  const controls = {};
+
+  for (const frame of frames) {
+    for (const kind of ["category", "gradingTask", "period"]) {
+      const control = frame.controls?.[kind];
+      if (!control?.options?.length) continue;
+      const normalized = {
+        ...control,
+        frameIndex: frame.frameIndex,
+        pageUrl: frame.url || "",
+        options: normalizeSchoologyPageOptions(control.options)
+      };
+      if (!controls[kind] || normalized.options.length > controls[kind].options.length) {
+        controls[kind] = normalized;
+      }
+    }
+  }
+
+  return {
+    collectedAt: new Date().toISOString(),
+    pageUrl: frames.find((frame) => frame.url)?.url || "",
+    pageTitle: frames.find((frame) => frame.title)?.title || "",
+    controls,
+    frames
+  };
+}
+
+function normalizeSchoologyPageOptions(options) {
+  return (options || [])
+    .map((option) => ({
+      id: compactText(option.id),
+      title: compactText(option.title),
+      selected: Boolean(option.selected),
+      disabled: Boolean(option.disabled),
+      source: "schoology-page"
+    }))
+    .filter((option) => option.title && !isPlaceholderSchoologyOption(option));
+}
+
+function isPlaceholderSchoologyOption(option) {
+  const title = normalizeName(option.title);
+  return option.disabled
+    || (!compactText(option.id) && /^(select|choose|schoology default|none)$/i.test(title))
+    || /^-+$/.test(title);
+}
+
 function populateSchoologyNameSelect(select, rows, defaultLabel, emptyLabel) {
   const previousValue = compactText(select.value);
   select.innerHTML = "";
   select.append(new Option(defaultLabel, ""));
 
-  const titles = new Map();
-  for (const row of rows) {
-    const title = getSchoologyOptionTitle(row);
-    if (!title) continue;
-    const key = normalizeName(title);
-    if (!titles.has(key)) titles.set(key, title);
+  const options = collectSchoologyNameOptions(rows);
+  for (const option of options) {
+    addSchoologyNameSelectOption(select, option);
   }
 
-  for (const title of Array.from(titles.values()).sort((a, b) => a.localeCompare(b))) {
-    select.append(new Option(title, title));
-  }
-
-  if (!titles.size && emptyLabel) {
+  if (!options.length && emptyLabel) {
     const option = new Option(emptyLabel, "");
     option.disabled = true;
     select.append(option);
@@ -1862,7 +2087,21 @@ function populateSchoologyNameSelect(select, rows, defaultLabel, emptyLabel) {
   setSelectValueWithStoredOption(select, previousValue);
 }
 
-function setSelectValueWithStoredOption(select, value) {
+function mergeSchoologyNameSelectOptions(select, rows) {
+  const previousValue = compactText(select.value);
+  for (const option of collectSchoologyNameOptions(rows)) {
+    addSchoologyNameSelectOption(select, option);
+  }
+  setSelectValueWithStoredOption(select, previousValue);
+}
+
+function applySchoologyPageSelectedOption(select, control) {
+  if (compactText(select.value)) return;
+  const selected = (control?.options || []).find((option) => option.selected && option.title);
+  if (selected) setSelectValueWithStoredOption(select, selected.title, selected.id);
+}
+
+function setSelectValueWithStoredOption(select, value, schoologyId = "") {
   const normalizedValue = compactText(value);
   if (!normalizedValue) {
     select.value = "";
@@ -1870,9 +2109,51 @@ function setSelectValueWithStoredOption(select, value) {
   }
   const hasOption = Array.from(select.options).some((option) => option.value === normalizedValue);
   if (!hasOption) {
-    select.append(new Option(normalizedValue, normalizedValue));
+    addSchoologyNameSelectOption(select, { title: normalizedValue, id: schoologyId });
   }
   select.value = normalizedValue;
+}
+
+function addSchoologyNameSelectOption(select, option) {
+  const title = compactText(option.title);
+  if (!title) return;
+  const existing = Array.from(select.options).find((item) => item.value === title);
+  if (existing) {
+    if (!existing.dataset.schoologyId && option.id) existing.dataset.schoologyId = option.id;
+    return;
+  }
+  const selectOption = new Option(title, title);
+  if (option.id) selectOption.dataset.schoologyId = option.id;
+  select.append(selectOption);
+}
+
+function collectSchoologyNameOptions(rows) {
+  const options = new Map();
+  for (const row of rows) {
+    const title = getSchoologyOptionTitle(row);
+    if (!title) continue;
+    const key = normalizeName(title);
+    if (!options.has(key)) {
+      options.set(key, {
+        title,
+        id: schoologyFieldId(row?.id ?? row?.value),
+        selected: Boolean(row?.selected)
+      });
+    }
+  }
+  return Array.from(options.values()).sort((a, b) => a.title.localeCompare(b.title));
+}
+
+function syncSelectFallbackId(select, fallbackInput) {
+  const selected = select.selectedOptions?.[0];
+  const schoologyId = compactText(selected?.dataset?.schoologyId);
+  if (schoologyId) {
+    fallbackInput.value = schoologyId;
+    fallbackInput.dataset.autoFilled = "1";
+  } else if (fallbackInput.dataset.autoFilled === "1") {
+    fallbackInput.value = "";
+    delete fallbackInput.dataset.autoFilled;
+  }
 }
 
 function findSchoologyOptionByTitle(rows, title) {
@@ -2263,6 +2544,7 @@ function setCaptureButtonsDisabled(disabled) {
     elements.saveClassesButton,
     elements.saveSchoologyButton,
     elements.loadSchoologyOptionsButton,
+    elements.readSchoologyPageOptionsButton,
     elements.prepareAssignmentsButton,
     elements.previewSchoologyButton,
     elements.previewSchoologyTestButton,

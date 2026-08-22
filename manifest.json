@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Khan Grader",
   "description": "Capture Khan Academy individual student report minutes for teacher review.",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "permissions": [
     "activeTab",
     "scripting",
@@ -13,6 +13,8 @@
   "host_permissions": [
     "https://khanacademy.org/*",
     "https://*.khanacademy.org/*",
+    "https://schoology.com/*",
+    "https://*.schoology.com/*",
     "https://api.schoology.com/*"
   ],
   "action": {

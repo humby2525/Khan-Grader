@@ -91,10 +91,11 @@ Use **Find/Create Assignments** before the week starts if you want students to s
 2. Enter an assignment title template, such as `Khan Minutes - Week of {startDate}`.
 3. Enter a due date and due time. If due date is blank, the extension uses the selected week end date.
 4. Make sure each class has a Schoology section ID.
-5. Click **Load Grade Options** to fill the category, grading task, and grading period dropdowns from the saved sections.
-6. Choose the grading category, grading task, and grading period from the dropdowns.
-7. Use **Advanced Schoology IDs** only if Schoology does not return one of the dropdown options but you know the correct ID.
-8. Click **Find/Create Assignments**.
+5. Click **Load Grade Options** to fill the category and grading period dropdowns from the Schoology API.
+6. If the grading task dropdown is empty, open a Schoology assignment create or edit page in another tab and click **Read Schoology Page Dropdowns**. The extension reads the visible Schoology form dropdowns from that signed-in page.
+7. Choose the grading category, grading task, and grading period from the dropdowns.
+8. Use **Advanced Schoology IDs** only if Schoology does not return one of the dropdown options but you know the correct ID.
+9. Click **Find/Create Assignments**.
 
 The extension checks each section for an existing assignment with the exact same title. If it finds one, it reuses that assignment ID only when it also matches the selected assignment settings. If it does not find one, it creates a published, count-in-grade assignment using the max points, due date, due time, grading category, and grading period from the grading settings and saves the returned assignment ID into the class row. The assignment description tells students to spend the class goal minutes on Khan that week.
 
@@ -102,7 +103,7 @@ Schoology category, period, and task IDs can differ by section even when the vis
 
 After finding or creating each assignment, the extension fetches it back from Schoology and shows the published, available, count-in-grade, due date, category, period, points, and API self link in the assignment results table. If Schoology still returns an old matching title that is not usable, the extension marks it as skipped and creates a new assignment. If the Schoology page does not show the assignment, copy the Network Probe output after running **Find/Create Assignments**.
 
-Schoology's public assignment API documents `grading_category` and `grading_period` for assignment creation. It does not document a matching assignment field or option endpoint for the Schoology UI's grading task dropdown. The extension tries to load grading tasks from Schoology and includes an optional `grading_task` field for testing, but your Schoology tenant may reject or ignore it.
+Schoology's public assignment API documents `grading_category` and `grading_period` for assignment creation. It does not document a matching assignment field or option endpoint for the Schoology UI's grading task dropdown. The extension tries the API first, then can read the grading task options from the actual Schoology assignment page. It includes an optional `grading_task` field for testing, but your Schoology tenant may reject or ignore it.
 
 Supported title placeholders:
 
