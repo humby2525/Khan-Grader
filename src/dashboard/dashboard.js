@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.4.0";
+const BUILD_VERSION = "0.4.1";
 const STORAGE_KEY = "khanGrader.lastCapture";
 
 const elements = {};
@@ -558,8 +558,8 @@ function installKhanNetworkProbeInPage() {
   window.__KHAN_GRADER_NETWORK_PROBE__ = probe;
 
   window.fetch = async function khanGraderFetchProbe(input, init = {}) {
-    const request = normalizeFetchRequest(input, init);
-    const record = startProbeRecord("fetch", request.url, request.method, request.body);
+    const request = await normalizeFetchRequest(input, init);
+    const record = startProbeRecord("fetch", request.url, request.method, request.body, request);
 
     try {
       const response = await probe.originalFetch.apply(this, arguments);
@@ -583,7 +583,7 @@ function installKhanNetworkProbeInPage() {
 
   XMLHttpRequest.prototype.send = function khanGraderXhrSendProbe(body) {
     const info = this.__khanGraderProbe || {};
-    const record = startProbeRecord("xhr", info.url || "", info.method || "GET", body);
+    const record = startProbeRecord("xhr", info.url || "", info.method || "GET", body, {});
 
     this.addEventListener("loadend", () => {
       record.status = this.status;
@@ -600,14 +600,17 @@ function installKhanNetworkProbeInPage() {
 
   return { ok: true, reinstalled: true, url: location.href };
 
-  function startProbeRecord(type, url, method, body) {
+  function startProbeRecord(type, url, method, body, requestInfo = {}) {
+    const requestBodyPreview = serializeBody(body);
     const record = {
       type,
       startedAt: new Date().toISOString(),
       url: absoluteUrl(url),
       method: method || "GET",
-      requestBodyPreview: serializeBody(body),
-      requestJsonShape: parseJsonShape(serializeBody(body)),
+      requestHeaders: requestInfo.headers || {},
+      requestBodyReadError: requestInfo.bodyReadError || "",
+      requestBodyPreview,
+      requestJsonShape: parseJsonShape(requestBodyPreview),
       status: null,
       contentType: "",
       responseBodyPreview: "",
@@ -623,19 +626,47 @@ function installKhanNetworkProbeInPage() {
     return record;
   }
 
-  function normalizeFetchRequest(input, init) {
+  async function normalizeFetchRequest(input, init) {
     if (input instanceof Request) {
+      const method = init.method || input.method || "GET";
+      const headers = mergeHeaders(input.headers, init.headers);
+      let body = init.body || null;
+      let bodyReadError = "";
+
+      if (body === null && !["GET", "HEAD"].includes(String(method).toUpperCase())) {
+        try {
+          body = await input.clone().text();
+        } catch (error) {
+          bodyReadError = error?.message || String(error);
+        }
+      }
+
       return {
         url: input.url,
-        method: init.method || input.method || "GET",
-        body: init.body || null
+        method,
+        headers,
+        body,
+        bodyReadError
       };
     }
     return {
       url: String(input || ""),
       method: init.method || "GET",
-      body: init.body || null
+      headers: mergeHeaders(null, init.headers),
+      body: init.body || null,
+      bodyReadError: ""
     };
+  }
+
+  function mergeHeaders(baseHeaders, overrideHeaders) {
+    const headers = {};
+    for (const [key, value] of new Headers(baseHeaders || {}).entries()) {
+      headers[key] = value;
+    }
+    for (const [key, value] of new Headers(overrideHeaders || {}).entries()) {
+      headers[key] = value;
+    }
+    return headers;
   }
 
   function captureResponsePreview(record, response) {
