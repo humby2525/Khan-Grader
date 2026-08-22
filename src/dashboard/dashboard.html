@@ -13,7 +13,7 @@
           <h1>Khan Grader</h1>
           <p>Capture Khan Academy class or student activity minutes.</p>
         </div>
-        <span id="build">v0.7.1</span>
+        <span id="build">v0.8.0</span>
       </header>
 
       <section class="panel controls">
@@ -34,6 +34,32 @@
       </section>
 
       <p id="status" class="status">For a class, open the Khan Roster page, choose dates here, then click Capture Class via Khan API. For one student, open their Individual Student Report.</p>
+
+      <section class="panel">
+        <div class="section-header">
+          <h2>Saved Classes</h2>
+          <div class="button-row">
+            <button id="saveClassesButton" class="secondary" type="button">Save Classes</button>
+            <button id="captureAllClassesButton" type="button">Capture All Classes</button>
+          </div>
+        </div>
+        <div class="class-grid header">
+          <div>Class</div>
+          <div>Khan roster URL</div>
+        </div>
+        <div class="class-grid">
+          <input id="className1" type="text" placeholder="Class 1 name">
+          <input id="classUrl1" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster">
+        </div>
+        <div class="class-grid">
+          <input id="className2" type="text" placeholder="Class 2 name">
+          <input id="classUrl2" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster">
+        </div>
+        <div class="class-grid">
+          <input id="className3" type="text" placeholder="Class 3 name">
+          <input id="classUrl3" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster">
+        </div>
+      </section>
 
       <section class="summary-grid">
         <article>

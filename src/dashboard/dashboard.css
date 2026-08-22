@@ -39,6 +39,12 @@ button.secondary {
   color: #14212b;
 }
 
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .shell {
   margin: 0 auto;
   max-width: 1120px;
@@ -109,6 +115,21 @@ input {
   border-radius: 6px;
   min-height: 42px;
   padding: 0 10px;
+}
+
+.class-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(160px, 0.7fr) minmax(280px, 1.5fr);
+  margin-top: 10px;
+}
+
+.class-grid.header {
+  color: #52616b;
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 0;
+  text-transform: uppercase;
 }
 
 .status {
@@ -189,6 +210,10 @@ input {
   grid-template-columns: minmax(220px, 1fr) 140px 160px minmax(220px, 1fr);
 }
 
+.row.student-report.with-class {
+  grid-template-columns: minmax(140px, 0.7fr) minmax(220px, 1fr) 120px 140px minmax(180px, 0.9fr);
+}
+
 .row:nth-child(even) {
   background: #f7f9fa;
 }
@@ -227,6 +252,7 @@ pre {
   }
 
   .controls,
+  .class-grid,
   .summary-grid,
   .row {
     grid-template-columns: 1fr;

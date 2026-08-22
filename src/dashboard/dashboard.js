@@ -1,5 +1,6 @@
-const BUILD_VERSION = "0.7.1";
+const BUILD_VERSION = "0.8.0";
 const STORAGE_KEY = "khanGrader.lastCapture";
+const CLASS_CONFIG_STORAGE_KEY = "khanGrader.classConfigs";
 
 const elements = {};
 let lastCapture = null;
@@ -15,22 +16,59 @@ async function init() {
   elements.build.textContent = `v${BUILD_VERSION}`;
   elements.captureApiButton.addEventListener("click", captureCurrentStudentViaApi);
   elements.captureClassApiButton.addEventListener("click", captureClassViaApi);
+  elements.captureAllClassesButton.addEventListener("click", captureAllClassesViaApi);
   elements.captureButton.addEventListener("click", captureCurrentTab);
   elements.startNetworkProbeButton.addEventListener("click", startNetworkProbe);
   elements.collectNetworkProbeButton.addEventListener("click", collectNetworkProbe);
   elements.openKhanButton.addEventListener("click", () => chrome.tabs.create({ url: "https://classroom.khanacademy.org/" }));
+  elements.saveClassesButton.addEventListener("click", saveClassConfigs);
   elements.downloadButton.addEventListener("click", downloadCsv);
   elements.copyDiagnosticsButton.addEventListener("click", copyDiagnostics);
   elements.copyNetworkProbeButton.addEventListener("click", copyNetworkProbe);
 
   setDefaultWeek();
 
-  const stored = await chrome.storage.local.get(STORAGE_KEY);
+  const stored = await chrome.storage.local.get([STORAGE_KEY, CLASS_CONFIG_STORAGE_KEY]);
+  loadClassConfigs(stored[CLASS_CONFIG_STORAGE_KEY] || []);
   if (stored[STORAGE_KEY]) {
     lastCapture = stored[STORAGE_KEY];
     renderCapture(lastCapture);
     setStatus("Loaded previous capture.");
   }
+}
+
+function loadClassConfigs(configs) {
+  for (let index = 0; index < 3; index += 1) {
+    const config = configs[index] || {};
+    elements[`className${index + 1}`].value = config.name || "";
+    elements[`classUrl${index + 1}`].value = config.url || "";
+  }
+}
+
+function readClassConfigs() {
+  const configs = [];
+  for (let index = 1; index <= 3; index += 1) {
+    const name = compactText(elements[`className${index}`].value);
+    const url = compactText(elements[`classUrl${index}`].value);
+    if (!name && !url) continue;
+    configs.push({
+      name: name || `Class ${index}`,
+      url
+    });
+  }
+  return configs;
+}
+
+async function saveClassConfigs() {
+  const configs = readClassConfigs();
+  const invalid = configs.find((config) => !isValidKhanUrl(config.url));
+  if (invalid) {
+    setError(`Check the roster URL for ${invalid.name}. It should be a khanacademy.org URL.`);
+    return;
+  }
+
+  await chrome.storage.local.set({ [CLASS_CONFIG_STORAGE_KEY]: configs });
+  setStatus(`Saved ${configs.length} class roster URL(s).`);
 }
 
 async function startNetworkProbe() {
@@ -272,6 +310,68 @@ async function captureClassViaApi() {
   }
 }
 
+async function captureAllClassesViaApi() {
+  const startDate = elements.weekStart.value;
+  const endDate = elements.weekEnd.value;
+  if (!startDate || !endDate) {
+    setError("Choose a start date and end date before capturing all Khan classes.");
+    return;
+  }
+  if (startDate > endDate) {
+    setError("The start date must be before or equal to the end date.");
+    return;
+  }
+
+  const configs = readClassConfigs();
+  if (!configs.length) {
+    setError("Add and save at least one Khan roster URL before capturing all classes.");
+    return;
+  }
+
+  const invalid = configs.find((config) => !isValidKhanUrl(config.url));
+  if (invalid) {
+    setError(`Check the roster URL for ${invalid.name}. It should be a khanacademy.org URL.`);
+    return;
+  }
+
+  await chrome.storage.local.set({ [CLASS_CONFIG_STORAGE_KEY]: configs });
+  const previousDisabled = setCaptureButtonsDisabled(true);
+  const classCaptures = [];
+  const diagnostics = [];
+
+  try {
+    for (let index = 0; index < configs.length; index += 1) {
+      const config = configs[index];
+      setStatus(`Loading ${config.name} roster (${index + 1} of ${configs.length})...`);
+      const classCapture = await captureConfiguredClass(config, startDate, endDate);
+      classCaptures.push(classCapture.capture);
+      diagnostics.push(classCapture.diagnostics);
+      const studentCount = classCapture.capture.studentSummaries?.length || 0;
+      setStatus(`Captured ${config.name}: ${studentCount} student(s).`);
+    }
+
+    lastCapture = buildAllClassesCapture(classCaptures, diagnostics, startDate, endDate);
+    await chrome.storage.local.set({ [STORAGE_KEY]: lastCapture });
+    renderCapture(lastCapture);
+    setStatus(`Captured ${lastCapture.studentSummaries.length} student rows across ${classCaptures.length} class(es).`);
+  } catch (error) {
+    lastNetworkProbe = {
+      build: BUILD_VERSION,
+      type: "khan-all-classes-capture",
+      collectedAt: new Date().toISOString(),
+      startDate,
+      endDate,
+      diagnostics,
+      error: error.message || String(error)
+    };
+    elements.networkProbe.textContent = JSON.stringify(lastNetworkProbe, null, 2);
+    elements.copyNetworkProbeButton.disabled = false;
+    setError(error.message || String(error));
+  } finally {
+    restoreCaptureButtonsDisabled(previousDisabled);
+  }
+}
+
 async function findKhanTab() {
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (isKhanTab(activeTab)) return activeTab;
@@ -422,6 +522,61 @@ async function captureKhanClassBySwitching(tab, startDate, endDate) {
   return result;
 }
 
+async function captureConfiguredClass(config, startDate, endDate) {
+  let tab = null;
+  try {
+    tab = await chrome.tabs.create({ url: config.url, active: false });
+    await waitForTabReady(tab.id, 20000);
+    await delay(1500);
+
+    const loadedTab = await chrome.tabs.get(tab.id);
+    const rosterResult = await collectKhanRoster(loadedTab);
+    if (rosterResult.students.length <= 1) {
+      throw new Error(`${config.name}: only found ${rosterResult.students.length} student(s) on the roster page.`);
+    }
+
+    const apiResult = await requestKhanActivitiesForRoster(loadedTab, rosterResult.students, startDate, endDate);
+    const capture = buildClassApiCapture(loadedTab, {
+      ...rosterResult,
+      className: config.name
+    }, apiResult, startDate, endDate);
+
+    capture.className = config.name;
+    capture.studentSummaries = (capture.studentSummaries || []).map((student) => ({
+      ...student,
+      className: config.name
+    }));
+    capture.rows = (capture.rows || []).map((row) => ({
+      ...row,
+      className: config.name
+    }));
+    capture.structuredApi = {
+      ...capture.structuredApi,
+      className: config.name,
+      rosterUrl: config.url
+    };
+
+    return {
+      capture,
+      diagnostics: {
+        className: config.name,
+        rosterUrl: config.url,
+        rosterCount: rosterResult.students.length,
+        successCount: capture.structuredApi.successCount,
+        errorCount: capture.structuredApi.errorCount
+      }
+    };
+  } finally {
+    if (tab?.id) {
+      try {
+        await chrome.tabs.remove(tab.id);
+      } catch {
+        // Closing a temporary tab is best effort only.
+      }
+    }
+  }
+}
+
 function buildApiCapture(tab, pageCapture, apiResult, startDate, endDate) {
   const studentName = pageCapture?.studentSummary?.studentName || apiResult.studentName || apiResult.studentKaid || "";
   const dateRange = `${startDate} - ${endDate}`;
@@ -470,6 +625,7 @@ function buildApiCapture(tab, pageCapture, apiResult, startDate, endDate) {
 function buildClassApiCapture(tab, rosterResult, apiResult, startDate, endDate) {
   const dateRange = `${startDate} - ${endDate}`;
   const studentSummaries = apiResult.results.map((result) => ({
+    className: rosterResult.className || "",
     studentName: result.studentName || result.studentKaid,
     studentKaid: result.studentKaid,
     exerciseMinutes: result.exerciseMinutes,
@@ -482,6 +638,7 @@ function buildClassApiCapture(tab, rosterResult, apiResult, startDate, endDate) 
   const totalExerciseMinutes = successful.reduce((total, student) => total + Number(student.exerciseMinutes || 0), 0);
   const totalTimeOnTaskMinutes = successful.reduce((total, student) => total + Number(student.timeOnTaskMinutes || 0), 0);
   const activityRows = apiResult.results.flatMap((result) => (result.sessions || []).map((session) => ({
+    className: rosterResult.className || "",
     dateText: formatActivityDate(session.eventTimestamp),
     activity: compactText([result.studentName || result.studentKaid, session.itemTitle, session.itemSubtitle].filter(Boolean).join(" - ")) || session.contentKind || "Activity",
     minutes: session.durationMinutes ?? "",
@@ -498,6 +655,7 @@ function buildClassApiCapture(tab, rosterResult, apiResult, startDate, endDate) 
     expectedWeekStart: startDate,
     expectedWeekEnd: endDate,
     capturedAt: new Date().toISOString(),
+    className: rosterResult.className || "",
     studentSummary: {
       studentName: `${studentSummaries.length} students`,
       exerciseMinutes: totalExerciseMinutes,
@@ -507,6 +665,7 @@ function buildClassApiCapture(tab, rosterResult, apiResult, startDate, endDate) 
     },
     studentSummaries,
     rows: studentSummaries.map((student) => ({
+      className: student.className,
       name: student.studentName,
       minutes: student.timeOnTaskMinutes ?? "",
       sourceText: student.error || `Exercises ${student.exerciseMinutes ?? ""}; Time on task ${student.timeOnTaskMinutes ?? ""}`
@@ -515,6 +674,7 @@ function buildClassApiCapture(tab, rosterResult, apiResult, startDate, endDate) 
     frameReports: [],
     structuredApi: {
       operationName: "KAClassroom_GetActivitySessions",
+      className: rosterResult.className || "",
       startDate,
       endDate,
       rosterCount: rosterResult.students.length,
@@ -523,6 +683,50 @@ function buildClassApiCapture(tab, rosterResult, apiResult, startDate, endDate) 
       roster: rosterResult.students,
       rosterFrames: rosterResult.frameResults,
       results: apiResult.results
+    }
+  };
+}
+
+function buildAllClassesCapture(classCaptures, diagnostics, startDate, endDate) {
+  const dateRange = `${startDate} - ${endDate}`;
+  const studentSummaries = classCaptures.flatMap((capture) => capture.studentSummaries || []);
+  const successful = studentSummaries.filter((student) => !student.error);
+  const totalExerciseMinutes = successful.reduce((total, student) => total + Number(student.exerciseMinutes || 0), 0);
+  const totalTimeOnTaskMinutes = successful.reduce((total, student) => total + Number(student.timeOnTaskMinutes || 0), 0);
+  const activityRows = classCaptures.flatMap((capture) => capture.activityRows || []);
+  const rows = classCaptures.flatMap((capture) => capture.rows || []);
+
+  return {
+    pageUrl: classCaptures.map((capture) => capture.pageUrl).filter(Boolean).join(" | "),
+    pageTitle: "Khan All Classes",
+    bestFrameUrl: `${classCaptures.length} roster page(s)`,
+    bestFrameTitle: "Khan All Classes",
+    pageKind: "all-classes-api",
+    dateRange,
+    expectedWeekStart: startDate,
+    expectedWeekEnd: endDate,
+    capturedAt: new Date().toISOString(),
+    studentSummary: {
+      studentName: `${studentSummaries.length} students / ${classCaptures.length} classes`,
+      exerciseMinutes: totalExerciseMinutes,
+      timeOnTaskMinutes: totalTimeOnTaskMinutes,
+      detectedDateRange: dateRange,
+      sourceText: "Khan GraphQL all-classes capture"
+    },
+    studentSummaries,
+    rows,
+    activityRows,
+    frameReports: [],
+    structuredApi: {
+      operationName: "KAClassroom_GetActivitySessions",
+      startDate,
+      endDate,
+      classCount: classCaptures.length,
+      studentRowCount: studentSummaries.length,
+      successCount: successful.length,
+      errorCount: studentSummaries.length - successful.length,
+      classes: diagnostics,
+      captures: classCaptures.map((capture) => capture.structuredApi)
     }
   };
 }
@@ -568,6 +772,7 @@ function scoreReport(report) {
 
 function renderStudentSummary(summary, summaries = []) {
   const rows = summaries.length ? summaries : hasStudentSummary(summary) ? [summary] : [];
+  const includeClass = rows.some((row) => row.className);
   elements.studentSummaryTable.className = rows.length ? "table" : "table empty";
   elements.studentSummaryTable.innerHTML = "";
 
@@ -577,14 +782,22 @@ function renderStudentSummary(summary, summaries = []) {
   }
 
   const header = document.createElement("div");
-  header.className = "row student-report header";
-  header.innerHTML = "<div>Student</div><div>Exercises</div><div>Time on task</div><div>Date range</div>";
+  header.className = includeClass ? "row student-report with-class header" : "row student-report header";
+  header.innerHTML = includeClass
+    ? "<div>Class</div><div>Student</div><div>Exercises</div><div>Time on task</div><div>Date range</div>"
+    : "<div>Student</div><div>Exercises</div><div>Time on task</div><div>Date range</div>";
   elements.studentSummaryTable.append(header);
 
   for (const row of rows) {
     const line = document.createElement("div");
-    line.className = "row student-report";
-    line.innerHTML = `
+    line.className = includeClass ? "row student-report with-class" : "row student-report";
+    line.innerHTML = includeClass ? `
+      <div>${escapeHtml(row.className || "")}</div>
+      <div>${escapeHtml(row.studentName || "Not detected")}${row.error ? `<div class="source">${escapeHtml(row.error)}</div>` : ""}</div>
+      <div>${escapeHtml(formatMinutes(row.exerciseMinutes))}</div>
+      <div>${escapeHtml(formatMinutes(row.timeOnTaskMinutes))}</div>
+      <div>${escapeHtml(row.detectedDateRange || "Not detected")}</div>
+    ` : `
       <div>${escapeHtml(row.studentName || "Not detected")}${row.error ? `<div class="source">${escapeHtml(row.error)}</div>` : ""}</div>
       <div>${escapeHtml(formatMinutes(row.exerciseMinutes))}</div>
       <div>${escapeHtml(formatMinutes(row.timeOnTaskMinutes))}</div>
@@ -690,11 +903,12 @@ function downloadCsv() {
   const studentSummaries = lastCapture.studentSummaries || [];
   const csv = studentSummaries.length
     ? [
-      "Expected Week Start,Expected Week End,Khan Date Range,Student,Student KAID,Exercise Minutes,Time On Task Minutes,Error,Source",
+      "Expected Week Start,Expected Week End,Khan Date Range,Class,Student,Student KAID,Exercise Minutes,Time On Task Minutes,Error,Source",
       ...studentSummaries.map((row) => [
         lastCapture.expectedWeekStart,
         lastCapture.expectedWeekEnd,
         row.detectedDateRange || lastCapture.dateRange,
+        row.className || "",
         row.studentName,
         row.studentKaid || "",
         row.exerciseMinutes ?? "",
@@ -838,6 +1052,68 @@ function formatActivityDate(value) {
     month: "2-digit",
     day: "2-digit"
   });
+}
+
+function isValidKhanUrl(value) {
+  try {
+    const url = new URL(value);
+    return /(^|\.)khanacademy\.org$/i.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function waitForTabReady(tabId, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      reject(new Error("Timed out waiting for Khan roster page to load."));
+    }, timeoutMs);
+
+    function finish() {
+      clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      resolve();
+    }
+
+    function onUpdated(updatedTabId, changeInfo) {
+      if (updatedTabId === tabId && changeInfo.status === "complete") finish();
+    }
+
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.get(tabId, (tab) => {
+      if (chrome.runtime.lastError) {
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      if (tab?.status === "complete") finish();
+    });
+  });
+}
+
+function setCaptureButtonsDisabled(disabled) {
+  const buttons = [
+    elements.captureApiButton,
+    elements.captureClassApiButton,
+    elements.captureAllClassesButton,
+    elements.captureButton,
+    elements.saveClassesButton
+  ].filter(Boolean);
+  const previous = buttons.map((button) => ({ button, disabled: button.disabled }));
+  for (const button of buttons) button.disabled = disabled;
+  return previous;
+}
+
+function restoreCaptureButtonsDisabled(previous) {
+  for (const item of previous || []) {
+    item.button.disabled = item.disabled;
+  }
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function toDateInput(date) {

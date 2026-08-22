@@ -41,6 +41,18 @@ Recommended class workflow:
 
 If Khan does not expose the roster directly, the Khan tab may visibly move from student to student during capture. Leave the Khan tab open until the extension finishes.
 
+## All-classes capture
+
+For weekly use across multiple classes:
+
+1. Paste each Khan class Roster URL into **Saved Classes**.
+2. Give each class a short class name.
+3. Click **Save Classes**.
+4. Choose the start and end dates.
+5. Click **Capture All Classes**.
+
+The extension opens each saved roster page in a temporary Chrome tab, captures that class, closes the temporary tab, then combines all rows into one table and CSV. The saved class list stays in `chrome.storage.local` on this Chrome profile.
+
 ## Network probe
 
 Use the network probe to test whether Khan sends report dates in its own request data.
