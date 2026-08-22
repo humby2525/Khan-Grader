@@ -93,6 +93,8 @@ Use **Find/Create Assignments** before the week starts if you want students to s
 
 The extension checks each section for an existing assignment with the exact same title. If it finds one, it reuses that assignment ID. If it does not find one, it creates a published, count-in-grade assignment using the max points from the grading settings and saves the returned assignment ID into the class row.
 
+After finding or creating each assignment, the extension fetches it back from Schoology and shows the published, available, count-in-grade, due date, points, and API self link in the assignment results table. If the Schoology page does not show the assignment, copy the Network Probe output after running **Find/Create Assignments**.
+
 Supported title placeholders:
 
 ```text

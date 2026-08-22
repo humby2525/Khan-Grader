@@ -229,7 +229,7 @@ select {
 }
 
 .row.assignment-preview {
-  grid-template-columns: minmax(120px, 0.8fr) minmax(240px, 1.5fr) 120px minmax(160px, 1fr);
+  grid-template-columns: minmax(110px, 0.7fr) minmax(220px, 1.4fr) 110px minmax(180px, 1fr) minmax(160px, 1fr);
 }
 
 .row:nth-child(even) {

@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.10.0";
+const BUILD_VERSION = "0.10.1";
 const STORAGE_KEY = "khanGrader.lastCapture";
 const CLASS_CONFIG_STORAGE_KEY = "khanGrader.classConfigs";
 const SCHOOLOGY_CONFIG_STORAGE_KEY = "khanGrader.schoologyConfig";
@@ -1034,6 +1034,13 @@ async function prepareSchoologyAssignments() {
     loadClassConfigs(updatedConfigs);
     await chrome.storage.local.set({ [CLASS_CONFIG_STORAGE_KEY]: updatedConfigs });
     renderAssignmentResults(result);
+    lastNetworkProbe = {
+      build: BUILD_VERSION,
+      type: "schoology-assignment-prep",
+      ...result
+    };
+    elements.networkProbe.textContent = JSON.stringify(lastNetworkProbe, null, 2);
+    elements.copyNetworkProbeButton.disabled = false;
     lastSchoologyPreview = null;
     renderSchoologyPreview(null);
 
@@ -1215,23 +1222,28 @@ async function findOrCreateSchoologyAssignments(classConfigs, schoologyConfig, s
       const assignments = await fetchSchoologyAssignments(classConfig.schoologySectionId, schoologyConfig);
       const existing = assignments.find((assignment) => compactText(assignment.title) === title);
       if (existing?.id) {
+        const verified = await fetchSchoologyAssignment(classConfig.schoologySectionId, existing.id, schoologyConfig);
         rows.push({
           className: classConfig.name || "",
           sectionId: classConfig.schoologySectionId,
           assignmentId: String(existing.id),
           title,
-          status: "found"
+          status: "found",
+          ...summarizeSchoologyAssignment(verified)
         });
         continue;
       }
 
       const created = await createSchoologyAssignment(classConfig, schoologyConfig, title, due);
+      const createdId = String(created.id || created.grade_item_id || "");
+      const verified = await fetchSchoologyAssignment(classConfig.schoologySectionId, createdId, schoologyConfig);
       rows.push({
         className: classConfig.name || "",
         sectionId: classConfig.schoologySectionId,
-        assignmentId: String(created.id || created.grade_item_id || ""),
+        assignmentId: createdId,
         title,
-        status: "created"
+        status: "created",
+        ...summarizeSchoologyAssignment(verified)
       });
     } catch (error) {
       rows.push({
@@ -1261,6 +1273,12 @@ async function fetchSchoologyAssignments(sectionId, schoologyConfig) {
   return normalizeArray(json?.assignment);
 }
 
+async function fetchSchoologyAssignment(sectionId, assignmentId, schoologyConfig) {
+  return schoologyFetchJson(`/sections/${encodeURIComponent(sectionId)}/assignments/${encodeURIComponent(assignmentId)}`, {
+    method: "GET"
+  }, schoologyConfig);
+}
+
 async function createSchoologyAssignment(classConfig, schoologyConfig, title, due) {
   const json = await schoologyFetchJson(`/sections/${encodeURIComponent(classConfig.schoologySectionId)}/assignments`, {
     method: "POST",
@@ -1282,6 +1300,18 @@ async function createSchoologyAssignment(classConfig, schoologyConfig, title, du
     throw new Error(`Schoology created an assignment for ${classConfig.name}, but did not return an assignment ID.`);
   }
   return json;
+}
+
+function summarizeSchoologyAssignment(assignment) {
+  return {
+    verifiedTitle: assignment?.title || "",
+    due: assignment?.due || "",
+    maxPoints: assignment?.max_points ?? "",
+    published: assignment?.published ?? "",
+    available: assignment?.available ?? "",
+    countInGrade: assignment?.count_in_grade ?? "",
+    selfLink: assignment?.links?.self || ""
+  };
 }
 
 function applyAssignmentIdsToClassConfigs(classConfigs, rows) {
@@ -1645,7 +1675,7 @@ function renderAssignmentResults(result) {
 
   const header = document.createElement("div");
   header.className = "row assignment-preview header";
-  header.innerHTML = "<div>Class</div><div>Assignment</div><div>ID</div><div>Status</div>";
+  header.innerHTML = "<div>Class</div><div>Assignment</div><div>ID</div><div>Visibility</div><div>Status</div>";
   elements.assignmentTable.append(header);
 
   for (const row of rows) {
@@ -1653,12 +1683,28 @@ function renderAssignmentResults(result) {
     line.className = "row assignment-preview";
     line.innerHTML = `
       <div>${escapeHtml(row.className || "")}</div>
-      <div>${escapeHtml(row.title || "")}</div>
+      <div>${escapeHtml(row.verifiedTitle || row.title || "")}<div class="source">${escapeHtml(row.due ? `Due ${row.due}` : "")}</div></div>
       <div>${escapeHtml(row.assignmentId || "")}</div>
-      <div>${escapeHtml(formatAssignmentStatus(row.status))}${row.error ? `<div class="source">${escapeHtml(row.error)}</div>` : ""}</div>
+      <div>${escapeHtml(formatAssignmentVisibility(row))}</div>
+      <div>${escapeHtml(formatAssignmentStatus(row.status))}${row.selfLink ? `<div class="source">${escapeHtml(row.selfLink)}</div>` : ""}${row.error ? `<div class="source">${escapeHtml(row.error)}</div>` : ""}</div>
     `;
     elements.assignmentTable.append(line);
   }
+}
+
+function formatAssignmentVisibility(row) {
+  if (row.status === "error") return "";
+  return [
+    `Published ${formatSchoologyFlag(row.published)}`,
+    `Available ${formatSchoologyFlag(row.available)}`,
+    `Counts ${formatSchoologyFlag(row.countInGrade)}`,
+    row.maxPoints !== "" ? `${row.maxPoints} pts` : ""
+  ].filter(Boolean).join(" / ");
+}
+
+function formatSchoologyFlag(value) {
+  if (value === "" || value === undefined || value === null) return "?";
+  return String(value) === "1" || value === true ? "yes" : "no";
 }
 
 function formatAssignmentStatus(status) {
