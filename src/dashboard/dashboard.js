@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.11.1";
+const BUILD_VERSION = "0.12.0";
 const DEFAULT_ASSIGNMENT_TITLE_TEMPLATE = "Khan Minutes - Week of {startDate}";
 const LEGACY_ASSIGNMENT_TITLE_TEMPLATE = "Khan Active Minutes - Week of {startDate}";
 const STORAGE_KEY = "khanGrader.lastCapture";
@@ -104,7 +104,9 @@ function loadSchoologyConfig(config) {
   elements.assignmentTitleTemplate.value = getStoredAssignmentTitleTemplate(config.assignmentTitleTemplate);
   elements.assignmentDueDate.value = config.assignmentDueDate || "";
   elements.assignmentDueTime.value = config.assignmentDueTime || "23:59";
-  elements.assignmentCategoryName.value = config.assignmentCategoryName || "";
+  setSelectValueWithStoredOption(elements.assignmentCategoryName, config.assignmentCategoryName || "");
+  setSelectValueWithStoredOption(elements.assignmentPeriodName, config.assignmentPeriodName || "");
+  setSelectValueWithStoredOption(elements.assignmentGradingTaskName, config.assignmentGradingTaskName || "");
   elements.assignmentCategoryId.value = config.assignmentCategoryId || "";
   elements.assignmentPeriodId.value = config.assignmentPeriodId || "";
   elements.assignmentGradingTaskId.value = config.assignmentGradingTaskId || "";
@@ -123,6 +125,8 @@ function readSchoologyConfig() {
     assignmentDueDate: compactText(elements.assignmentDueDate.value),
     assignmentDueTime: compactText(elements.assignmentDueTime.value) || "23:59",
     assignmentCategoryName: compactText(elements.assignmentCategoryName.value),
+    assignmentPeriodName: compactText(elements.assignmentPeriodName.value),
+    assignmentGradingTaskName: compactText(elements.assignmentGradingTaskName.value),
     assignmentCategoryId: compactText(elements.assignmentCategoryId.value),
     assignmentPeriodId: compactText(elements.assignmentPeriodId.value),
     assignmentGradingTaskId: compactText(elements.assignmentGradingTaskId.value),
@@ -175,30 +179,35 @@ async function loadSchoologyAssignmentOptions() {
   try {
     setStatus(`Loading Schoology grade options for ${optionClassConfigs.length} section(s)...`);
     const sections = await Promise.all(optionClassConfigs.map(async (classConfig) => {
-      const [categories, gradingPeriods] = await Promise.all([
+      const [categories, gradingPeriods, gradingTasks] = await Promise.all([
         fetchSchoologyGradingCategories(classConfig.schoologySectionId, schoologyConfig),
-        fetchSchoologyGradingPeriods(classConfig.schoologySectionId, schoologyConfig)
+        fetchSchoologyGradingPeriods(classConfig.schoologySectionId, schoologyConfig),
+        fetchOptionalSchoologyGradingTasks(classConfig.schoologySectionId, schoologyConfig)
       ]);
       return {
         className: classConfig.name || "",
         sectionId: classConfig.schoologySectionId,
         categories,
-        gradingPeriods
+        gradingPeriods,
+        gradingTasks: gradingTasks.rows,
+        gradingTaskError: gradingTasks.error
       };
     }));
-    populateSchoologyCategoryOptions(elements.assignmentCategoryOptions, sections.flatMap((section) => section.categories));
-    populateSchoologyIdOptions(elements.assignmentPeriodOptions, sections.flatMap((section) => section.gradingPeriods));
+    populateSchoologyNameSelect(elements.assignmentCategoryName, sections.flatMap((section) => section.categories), "Schoology default", "No categories returned");
+    populateSchoologyNameSelect(elements.assignmentPeriodName, sections.flatMap((section) => section.gradingPeriods), "Schoology default", "No periods returned");
+    populateSchoologyNameSelect(elements.assignmentGradingTaskName, sections.flatMap((section) => section.gradingTasks), "Schoology default", "No grading tasks returned by API");
 
     lastNetworkProbe = {
       build: BUILD_VERSION,
       type: "schoology-grade-options",
       sections,
-      note: "Category IDs can differ by section. Choose a category by title so the extension can resolve each section's matching category ID."
+      note: "Category, period, and task IDs can differ by section. Choose the visible title so the extension can resolve each section's matching ID. Schoology's public docs do not list a grading-task endpoint, so task options may be unavailable."
     };
     elements.networkProbe.textContent = JSON.stringify(lastNetworkProbe, null, 2);
     const categoryTitles = countUniqueOptionTitles(sections.flatMap((section) => section.categories));
-    const periodCount = countUniqueOptionIds(sections.flatMap((section) => section.gradingPeriods));
-    setStatus(`Loaded ${categoryTitles} category name${categoryTitles === 1 ? "" : "s"} and ${periodCount} grading period ID${periodCount === 1 ? "" : "s"} from ${sections.length} section(s).`);
+    const periodTitles = countUniqueOptionTitles(sections.flatMap((section) => section.gradingPeriods));
+    const taskTitles = countUniqueOptionTitles(sections.flatMap((section) => section.gradingTasks));
+    setStatus(`Loaded ${categoryTitles} categor${categoryTitles === 1 ? "y" : "ies"}, ${periodTitles} period${periodTitles === 1 ? "" : "s"}, and ${taskTitles} grading task${taskTitles === 1 ? "" : "s"} from ${sections.length} section(s).`);
   } catch (error) {
     setError(error.message || String(error));
   } finally {
@@ -1392,11 +1401,32 @@ async function fetchSchoologyGradingPeriods(sectionId, schoologyConfig) {
   return normalizeSchoologyCollection(json, ["grading_period", "grading_periods", "gradingperiods"]);
 }
 
+async function fetchSchoologyGradingTasks(sectionId, schoologyConfig) {
+  const json = await schoologyFetchJson(`/sections/${encodeURIComponent(sectionId)}/grading_tasks`, {
+    method: "GET"
+  }, schoologyConfig);
+  return normalizeSchoologyCollection(json, ["grading_task", "grading_tasks", "gradingtask", "gradingtasks"]);
+}
+
+async function fetchOptionalSchoologyGradingTasks(sectionId, schoologyConfig) {
+  try {
+    return {
+      rows: await fetchSchoologyGradingTasks(sectionId, schoologyConfig),
+      error: ""
+    };
+  } catch (error) {
+    return {
+      rows: [],
+      error: error.message || String(error)
+    };
+  }
+}
+
 async function resolveSchoologyAssignmentFields(classConfig, schoologyConfig) {
   return {
     categoryId: await resolveSchoologyCategoryId(classConfig, schoologyConfig),
-    periodId: compactText(schoologyConfig.assignmentPeriodId),
-    gradingTaskId: compactText(schoologyConfig.assignmentGradingTaskId)
+    periodId: await resolveSchoologyPeriodId(classConfig, schoologyConfig),
+    gradingTaskId: await resolveSchoologyGradingTaskId(classConfig, schoologyConfig)
   };
 }
 
@@ -1405,14 +1435,36 @@ async function resolveSchoologyCategoryId(classConfig, schoologyConfig) {
   if (!categoryName) return compactText(schoologyConfig.assignmentCategoryId);
 
   const categories = await fetchSchoologyGradingCategories(classConfig.schoologySectionId, schoologyConfig);
-  const categoryKey = normalizeName(categoryName);
-  const match = categories.find((category) => normalizeName(category.title || category.name) === categoryKey);
+  const match = findSchoologyOptionByTitle(categories, categoryName);
   if (!match?.id) {
-    const available = categories
-      .map((category) => compactText(category.title || category.name))
-      .filter(Boolean)
-      .join(", ");
+    const available = formatAvailableSchoologyOptionTitles(categories);
     throw new Error(`Could not find grading category "${categoryName}" for ${classConfig.name || `section ${classConfig.schoologySectionId}`}.${available ? ` Available categories: ${available}` : ""}`);
+  }
+  return String(match.id);
+}
+
+async function resolveSchoologyPeriodId(classConfig, schoologyConfig) {
+  const periodName = compactText(schoologyConfig.assignmentPeriodName);
+  if (!periodName) return compactText(schoologyConfig.assignmentPeriodId);
+
+  const periods = await fetchSchoologyGradingPeriods(classConfig.schoologySectionId, schoologyConfig);
+  const match = findSchoologyOptionByTitle(periods, periodName);
+  if (!match?.id) {
+    const available = formatAvailableSchoologyOptionTitles(periods);
+    throw new Error(`Could not find grading period "${periodName}" for ${classConfig.name || `section ${classConfig.schoologySectionId}`}.${available ? ` Available periods: ${available}` : ""}`);
+  }
+  return String(match.id);
+}
+
+async function resolveSchoologyGradingTaskId(classConfig, schoologyConfig) {
+  const taskName = compactText(schoologyConfig.assignmentGradingTaskName);
+  if (!taskName) return compactText(schoologyConfig.assignmentGradingTaskId);
+
+  const tasks = await fetchSchoologyGradingTasks(classConfig.schoologySectionId, schoologyConfig);
+  const match = findSchoologyOptionByTitle(tasks, taskName);
+  if (!match?.id) {
+    const available = formatAvailableSchoologyOptionTitles(tasks);
+    throw new Error(`Could not find grading task "${taskName}" for ${classConfig.name || `section ${classConfig.schoologySectionId}`}.${available ? ` Available tasks: ${available}` : ""}`);
   }
   return String(match.id);
 }
@@ -1776,6 +1828,7 @@ function normalizeArray(value) {
 }
 
 function normalizeSchoologyCollection(json, keys) {
+  if (Array.isArray(json)) return json;
   for (const key of keys) {
     const rows = normalizeArray(json?.[key]);
     if (rows.length) return rows;
@@ -1783,54 +1836,68 @@ function normalizeSchoologyCollection(json, keys) {
   return [];
 }
 
-function populateSchoologyIdOptions(datalist, rows) {
-  datalist.innerHTML = "";
-  const seen = new Set();
-  for (const row of rows) {
-    if (row?.id === undefined || row?.id === null || row.id === "") continue;
-    const key = String(row.id);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const option = document.createElement("option");
-    option.value = String(row.id);
-    option.label = compactText(row.title || row.name || "");
-    option.textContent = option.label ? `${option.label} (${option.value})` : option.value;
-    datalist.append(option);
-  }
-}
+function populateSchoologyNameSelect(select, rows, defaultLabel, emptyLabel) {
+  const previousValue = compactText(select.value);
+  select.innerHTML = "";
+  select.append(new Option(defaultLabel, ""));
 
-function populateSchoologyCategoryOptions(datalist, rows) {
-  datalist.innerHTML = "";
   const titles = new Map();
   for (const row of rows) {
-    const title = compactText(row?.title || row?.name || "");
+    const title = getSchoologyOptionTitle(row);
     if (!title) continue;
     const key = normalizeName(title);
     if (!titles.has(key)) titles.set(key, title);
   }
+
   for (const title of Array.from(titles.values()).sort((a, b) => a.localeCompare(b))) {
-    const option = document.createElement("option");
-    option.value = title;
-    datalist.append(option);
+    select.append(new Option(title, title));
   }
+
+  if (!titles.size && emptyLabel) {
+    const option = new Option(emptyLabel, "");
+    option.disabled = true;
+    select.append(option);
+  }
+
+  setSelectValueWithStoredOption(select, previousValue);
+}
+
+function setSelectValueWithStoredOption(select, value) {
+  const normalizedValue = compactText(value);
+  if (!normalizedValue) {
+    select.value = "";
+    return;
+  }
+  const hasOption = Array.from(select.options).some((option) => option.value === normalizedValue);
+  if (!hasOption) {
+    select.append(new Option(normalizedValue, normalizedValue));
+  }
+  select.value = normalizedValue;
+}
+
+function findSchoologyOptionByTitle(rows, title) {
+  const key = normalizeName(title);
+  return rows.find((row) => normalizeName(getSchoologyOptionTitle(row)) === key);
+}
+
+function getSchoologyOptionTitle(row) {
+  return compactText(row?.title || row?.name || row?.label || row?.grading_task || "");
+}
+
+function formatAvailableSchoologyOptionTitles(rows) {
+  return rows
+    .map((row) => getSchoologyOptionTitle(row))
+    .filter(Boolean)
+    .join(", ");
 }
 
 function countUniqueOptionTitles(rows) {
   const titles = new Set();
   for (const row of rows) {
-    const title = compactText(row?.title || row?.name || "");
+    const title = getSchoologyOptionTitle(row);
     if (title) titles.add(normalizeName(title));
   }
   return titles.size;
-}
-
-function countUniqueOptionIds(rows) {
-  const ids = new Set();
-  for (const row of rows) {
-    const id = schoologyFieldId(row?.id);
-    if (id) ids.add(id);
-  }
-  return ids.size;
 }
 
 function addOptionalSchoologyId(body, fieldName, value) {

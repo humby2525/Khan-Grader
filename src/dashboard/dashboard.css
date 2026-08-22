@@ -134,6 +134,20 @@ select {
   margin-bottom: 16px;
 }
 
+.advanced-options {
+  border-top: 1px solid #d7e0e5;
+  margin-bottom: 16px;
+  padding-top: 12px;
+}
+
+.advanced-options summary {
+  color: #52616b;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
 .class-grid.header {
   color: #52616b;
   font-size: 12px;

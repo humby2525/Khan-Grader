@@ -150,21 +150,21 @@
           </label>
           <label>
             Grading category
-            <input id="assignmentCategoryName" type="text" list="assignmentCategoryOptions" placeholder="Schoology default">
-            <datalist id="assignmentCategoryOptions"></datalist>
+            <select id="assignmentCategoryName">
+              <option value="">Schoology default</option>
+            </select>
           </label>
           <label>
-            Category ID fallback
-            <input id="assignmentCategoryId" type="text" inputmode="numeric" placeholder="Only if category is blank">
+            Grading task
+            <select id="assignmentGradingTaskName">
+              <option value="">Schoology default</option>
+            </select>
           </label>
           <label>
-            Grading period ID
-            <input id="assignmentPeriodId" type="text" inputmode="numeric" list="assignmentPeriodOptions" placeholder="Schoology default">
-            <datalist id="assignmentPeriodOptions"></datalist>
-          </label>
-          <label>
-            Grading task ID
-            <input id="assignmentGradingTaskId" type="text" inputmode="numeric" placeholder="Optional">
+            Grading period
+            <select id="assignmentPeriodName">
+              <option value="">Schoology default</option>
+            </select>
           </label>
           <label>
             API base
@@ -179,6 +179,23 @@
             <input id="schoologyConsumerSecret" type="password" autocomplete="off">
           </label>
         </div>
+        <details class="advanced-options">
+          <summary>Advanced Schoology IDs</summary>
+          <div class="schoology-grid">
+            <label>
+              Category ID fallback
+              <input id="assignmentCategoryId" type="text" inputmode="numeric" placeholder="Only if category is blank">
+            </label>
+            <label>
+              Period ID fallback
+              <input id="assignmentPeriodId" type="text" inputmode="numeric" placeholder="Only if period is blank">
+            </label>
+            <label>
+              Grading task ID fallback
+              <input id="assignmentGradingTaskId" type="text" inputmode="numeric" placeholder="Only if task is blank">
+            </label>
+          </div>
+        </details>
         <div id="assignmentTable" class="table empty">No Schoology assignment preparation yet.</div>
         <div id="schoologyPreviewTable" class="table empty">No Schoology grade preview yet.</div>
       </section>
