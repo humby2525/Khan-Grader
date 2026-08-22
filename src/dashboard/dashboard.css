@@ -14,7 +14,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -110,9 +111,11 @@ label {
   gap: 6px;
 }
 
-input {
+input,
+select {
   border: 1px solid #b9c6ce;
   border-radius: 6px;
+  background: #fff;
   min-height: 42px;
   padding: 0 10px;
 }
@@ -120,8 +123,15 @@ input {
 .class-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(160px, 0.7fr) minmax(280px, 1.5fr);
+  grid-template-columns: minmax(140px, 0.8fr) minmax(260px, 1.5fr) minmax(140px, 0.7fr) minmax(150px, 0.7fr);
   margin-top: 10px;
+}
+
+.schoology-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin-bottom: 16px;
 }
 
 .class-grid.header {
@@ -212,6 +222,10 @@ input {
 
 .row.student-report.with-class {
   grid-template-columns: minmax(140px, 0.7fr) minmax(220px, 1fr) 120px 140px minmax(180px, 0.9fr);
+}
+
+.row.schoology-preview {
+  grid-template-columns: minmax(120px, 0.7fr) minmax(180px, 1fr) minmax(180px, 1fr) 90px 80px minmax(140px, 0.8fr);
 }
 
 .row:nth-child(even) {

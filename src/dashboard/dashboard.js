@@ -1,10 +1,12 @@
-const BUILD_VERSION = "0.8.1";
+const BUILD_VERSION = "0.9.0";
 const STORAGE_KEY = "khanGrader.lastCapture";
 const CLASS_CONFIG_STORAGE_KEY = "khanGrader.classConfigs";
+const SCHOOLOGY_CONFIG_STORAGE_KEY = "khanGrader.schoologyConfig";
 
 const elements = {};
 let lastCapture = null;
 let lastNetworkProbe = null;
+let lastSchoologyPreview = null;
 
 document.addEventListener("DOMContentLoaded", init);
 
@@ -22,14 +24,18 @@ async function init() {
   elements.collectNetworkProbeButton.addEventListener("click", collectNetworkProbe);
   elements.openKhanButton.addEventListener("click", () => chrome.tabs.create({ url: "https://classroom.khanacademy.org/" }));
   elements.saveClassesButton.addEventListener("click", saveClassConfigs);
+  elements.saveSchoologyButton.addEventListener("click", saveSchoologyConfig);
+  elements.previewSchoologyButton.addEventListener("click", previewSchoologyGrades);
+  elements.sendSchoologyButton.addEventListener("click", sendSchoologyGrades);
   elements.downloadButton.addEventListener("click", downloadCsv);
   elements.copyDiagnosticsButton.addEventListener("click", copyDiagnostics);
   elements.copyNetworkProbeButton.addEventListener("click", copyNetworkProbe);
 
   setDefaultWeek();
 
-  const stored = await chrome.storage.local.get([STORAGE_KEY, CLASS_CONFIG_STORAGE_KEY]);
+  const stored = await chrome.storage.local.get([STORAGE_KEY, CLASS_CONFIG_STORAGE_KEY, SCHOOLOGY_CONFIG_STORAGE_KEY]);
   loadClassConfigs(stored[CLASS_CONFIG_STORAGE_KEY] || []);
+  loadSchoologyConfig(stored[SCHOOLOGY_CONFIG_STORAGE_KEY] || {});
   if (stored[STORAGE_KEY]) {
     lastCapture = stored[STORAGE_KEY];
     renderCapture(lastCapture);
@@ -42,6 +48,8 @@ function loadClassConfigs(configs) {
     const config = configs[index] || {};
     elements[`className${index + 1}`].value = config.name || "";
     elements[`classUrl${index + 1}`].value = config.url || "";
+    elements[`classSectionId${index + 1}`].value = config.schoologySectionId || "";
+    elements[`classAssignmentId${index + 1}`].value = config.schoologyAssignmentId || "";
   }
 }
 
@@ -50,10 +58,14 @@ function readClassConfigs() {
   for (let index = 1; index <= 3; index += 1) {
     const name = compactText(elements[`className${index}`].value);
     const url = compactText(elements[`classUrl${index}`].value);
-    if (!name && !url) continue;
+    const schoologySectionId = compactText(elements[`classSectionId${index}`].value);
+    const schoologyAssignmentId = compactText(elements[`classAssignmentId${index}`].value);
+    if (!name && !url && !schoologySectionId && !schoologyAssignmentId) continue;
     configs.push({
       name: name || `Class ${index}`,
-      url
+      url,
+      schoologySectionId,
+      schoologyAssignmentId
     });
   }
   return configs;
@@ -69,6 +81,38 @@ async function saveClassConfigs() {
 
   await chrome.storage.local.set({ [CLASS_CONFIG_STORAGE_KEY]: configs });
   setStatus(`Saved ${configs.length} class roster URL(s).`);
+}
+
+function loadSchoologyConfig(config) {
+  elements.gradeMetric.value = config.gradeMetric || "timeOnTaskMinutes";
+  elements.gradeTargetMinutes.value = config.gradeTargetMinutes || 50;
+  elements.gradeMaxPoints.value = config.gradeMaxPoints || 100;
+  elements.schoologyApiBase.value = config.apiBase || "https://api.schoology.com/v1";
+  elements.schoologyConsumerKey.value = config.consumerKey || "";
+  elements.schoologyConsumerSecret.value = config.consumerSecret || "";
+}
+
+function readSchoologyConfig() {
+  return {
+    gradeMetric: elements.gradeMetric.value || "timeOnTaskMinutes",
+    gradeTargetMinutes: Number(elements.gradeTargetMinutes.value || 50),
+    gradeMaxPoints: Number(elements.gradeMaxPoints.value || 100),
+    apiBase: compactText(elements.schoologyApiBase.value) || "https://api.schoology.com/v1",
+    consumerKey: compactText(elements.schoologyConsumerKey.value),
+    consumerSecret: compactText(elements.schoologyConsumerSecret.value)
+  };
+}
+
+async function saveSchoologyConfig() {
+  const config = readSchoologyConfig();
+  const validation = validateSchoologyConfig(config);
+  if (validation) {
+    setError(validation);
+    return;
+  }
+
+  await chrome.storage.local.set({ [SCHOOLOGY_CONFIG_STORAGE_KEY]: config });
+  setStatus("Saved grading and Schoology settings on this Chrome profile.");
 }
 
 async function startNetworkProbe() {
@@ -775,6 +819,9 @@ function renderRosterDiagnostics(rosterResult) {
 }
 
 function renderCapture(capture) {
+  lastSchoologyPreview = null;
+  renderSchoologyPreview(null);
+
   const studentSummary = capture.studentSummary || emptyStudentSummary();
   elements.studentName.textContent = studentSummary.studentName || "Not detected";
   elements.exerciseMinutes.textContent = formatMinutes(studentSummary.exerciseMinutes);
@@ -925,6 +972,410 @@ async function copyNetworkProbe() {
   if (!lastNetworkProbe) return;
   await navigator.clipboard.writeText(JSON.stringify(lastNetworkProbe, null, 2));
   setStatus("Network probe copied.");
+}
+
+async function previewSchoologyGrades() {
+  const schoologyConfig = readSchoologyConfig();
+  const validation = validateSchoologyConfig(schoologyConfig);
+  if (validation) {
+    setError(validation);
+    return;
+  }
+
+  const students = getCapturedStudentSummaries();
+  if (!students.length) {
+    setError("Capture Khan class data before previewing Schoology grades.");
+    return;
+  }
+
+  const classConfigs = readClassConfigs();
+  await chrome.storage.local.set({
+    [CLASS_CONFIG_STORAGE_KEY]: classConfigs,
+    [SCHOOLOGY_CONFIG_STORAGE_KEY]: schoologyConfig
+  });
+
+  const previousDisabled = setCaptureButtonsDisabled(true);
+  try {
+    setStatus("Loading Schoology enrollments and matching students...");
+    lastSchoologyPreview = await buildSchoologyPreview(students, classConfigs, schoologyConfig);
+    renderSchoologyPreview(lastSchoologyPreview);
+
+    const readyCount = lastSchoologyPreview.rows.filter((row) => row.status === "ready").length;
+    const issueCount = lastSchoologyPreview.rows.length - readyCount;
+    setStatus(issueCount
+      ? `Preview ready: ${readyCount} grade(s) matched, ${issueCount} row(s) need attention.`
+      : `Preview ready: ${readyCount} grade(s) matched.`);
+  } catch (error) {
+    setError(error.message || String(error));
+  } finally {
+    restoreCaptureButtonsDisabled(previousDisabled);
+  }
+}
+
+async function sendSchoologyGrades() {
+  const schoologyConfig = readSchoologyConfig();
+  const validation = validateSchoologyConfig(schoologyConfig);
+  if (validation) {
+    setError(validation);
+    return;
+  }
+
+  if (!lastSchoologyPreview) {
+    await previewSchoologyGrades();
+  }
+  if (!lastSchoologyPreview) return;
+
+  const readyRows = lastSchoologyPreview.rows.filter((row) => row.status === "ready");
+  if (!readyRows.length) {
+    setError("No matched Schoology grade rows are ready to send.");
+    return;
+  }
+
+  const confirmed = window.confirm(`Send ${readyRows.length} Khan grade(s) to Schoology? This will update the selected assignment grade(s).`);
+  if (!confirmed) {
+    setStatus("Schoology send canceled.");
+    return;
+  }
+
+  const previousDisabled = setCaptureButtonsDisabled(true);
+  try {
+    setStatus(`Sending ${readyRows.length} grade(s) to Schoology...`);
+    await submitSchoologyGrades(readyRows, schoologyConfig);
+    renderSchoologyPreview(lastSchoologyPreview);
+
+    const sentCount = lastSchoologyPreview.rows.filter((row) => row.status === "sent").length;
+    const errorCount = lastSchoologyPreview.rows.filter((row) => row.status === "send_error").length;
+    setStatus(errorCount
+      ? `Sent ${sentCount} grade(s); ${errorCount} row(s) failed. Check the preview table.`
+      : `Sent ${sentCount} grade(s) to Schoology.`);
+  } catch (error) {
+    setError(error.message || String(error));
+  } finally {
+    restoreCaptureButtonsDisabled(previousDisabled);
+  }
+}
+
+function getCapturedStudentSummaries() {
+  const rows = lastCapture?.studentSummaries || [];
+  if (rows.length) return rows.filter((row) => row.studentName && !row.error);
+  const summary = lastCapture?.studentSummary;
+  return hasStudentSummary(summary) && summary.studentName ? [summary] : [];
+}
+
+async function buildSchoologyPreview(students, classConfigs, schoologyConfig) {
+  const configsByClass = new Map();
+  for (const config of classConfigs) {
+    configsByClass.set(normalizeName(config.name), config);
+  }
+
+  const enrollmentsBySection = new Map();
+  const requiredSections = Array.from(new Set(classConfigs
+    .map((config) => config.schoologySectionId)
+    .filter(Boolean)));
+
+  for (const sectionId of requiredSections) {
+    const enrollments = await fetchSchoologyEnrollments(sectionId, schoologyConfig);
+    enrollmentsBySection.set(sectionId, buildEnrollmentLookup(enrollments));
+  }
+
+  const grading = {
+    metric: schoologyConfig.gradeMetric,
+    metricLabel: schoologyConfig.gradeMetric === "exerciseMinutes" ? "Exercises" : "Time on task",
+    targetMinutes: schoologyConfig.gradeTargetMinutes,
+    maxPoints: schoologyConfig.gradeMaxPoints
+  };
+
+  return {
+    build: BUILD_VERSION,
+    createdAt: new Date().toISOString(),
+    expectedWeekStart: lastCapture?.expectedWeekStart || "",
+    expectedWeekEnd: lastCapture?.expectedWeekEnd || "",
+    grading,
+    rows: students.map((student) => {
+      const classConfig = configsByClass.get(normalizeName(student.className)) || (classConfigs.length === 1 ? classConfigs[0] : null);
+      const baseRow = buildGradePreviewRow(student, classConfig, grading);
+      if (!classConfig?.schoologySectionId) return { ...baseRow, status: "missing_section" };
+      if (!classConfig?.schoologyAssignmentId) return { ...baseRow, status: "missing_assignment" };
+
+      const enrollment = findEnrollmentForStudent(student.studentName, enrollmentsBySection.get(classConfig.schoologySectionId));
+      if (!enrollment) return { ...baseRow, status: "no_match" };
+
+      return {
+        ...baseRow,
+        status: "ready",
+        schoologyName: enrollment.name,
+        enrollmentId: enrollment.id
+      };
+    })
+  };
+}
+
+function buildGradePreviewRow(student, classConfig, grading) {
+  const minutes = Number(student[grading.metric] || 0);
+  const grade = calculateGrade(minutes, grading.targetMinutes, grading.maxPoints);
+  const dateRange = student.detectedDateRange || lastCapture?.dateRange || "";
+  return {
+    className: student.className || "",
+    studentName: student.studentName || "",
+    schoologyName: "",
+    sectionId: classConfig?.schoologySectionId || "",
+    assignmentId: classConfig?.schoologyAssignmentId || "",
+    enrollmentId: "",
+    metricMinutes: minutes,
+    grade,
+    dateRange,
+    status: "ready",
+    comment: `Khan ${grading.metricLabel}: ${minutes} min; target ${grading.targetMinutes} min; ${dateRange}`
+  };
+}
+
+function calculateGrade(minutes, targetMinutes, maxPoints) {
+  if (!Number.isFinite(minutes) || !Number.isFinite(targetMinutes) || !Number.isFinite(maxPoints) || targetMinutes <= 0 || maxPoints <= 0) return 0;
+  return Math.min(maxPoints, Math.round((Math.max(0, minutes) / targetMinutes) * maxPoints));
+}
+
+async function fetchSchoologyEnrollments(sectionId, schoologyConfig) {
+  const json = await schoologyFetchJson(`/sections/${encodeURIComponent(sectionId)}/enrollments?type=member&enrollment_status=1&limit=200`, {
+    method: "GET"
+  }, schoologyConfig);
+  return normalizeArray(json?.enrollment)
+    .filter((enrollment) => String(enrollment?.admin ?? "0") !== "1")
+    .filter((enrollment) => !enrollment?.status || String(enrollment.status) === "1");
+}
+
+function buildEnrollmentLookup(enrollments) {
+  const byName = new Map();
+  for (const enrollment of enrollments) {
+    const name = schoologyEnrollmentName(enrollment);
+    const id = String(enrollment?.id || "").trim();
+    if (!name || !id) continue;
+    for (const candidate of schoologyNameCandidates(enrollment)) {
+      const key = normalizeName(candidate);
+      if (key && !byName.has(key)) {
+        byName.set(key, { id, name });
+      }
+    }
+  }
+  return byName;
+}
+
+function findEnrollmentForStudent(studentName, enrollmentLookup) {
+  if (!enrollmentLookup) return null;
+  for (const candidate of studentNameCandidates(studentName)) {
+    const match = enrollmentLookup.get(normalizeName(candidate));
+    if (match) return match;
+  }
+  return null;
+}
+
+function schoologyEnrollmentName(enrollment) {
+  return compactText(enrollment?.name_display)
+    || compactText(`${enrollment?.name_first || ""} ${enrollment?.name_last || ""}`)
+    || compactText(enrollment?.name || "");
+}
+
+function schoologyNameCandidates(enrollment) {
+  const first = compactText(enrollment?.name_first_preferred || enrollment?.name_first || "");
+  const last = compactText(enrollment?.name_last || "");
+  return [
+    enrollment?.name_display,
+    `${first} ${last}`,
+    `${last} ${first}`,
+    `${last}, ${first}`,
+    enrollment?.name
+  ].filter(Boolean);
+}
+
+function studentNameCandidates(studentName) {
+  const compact = compactText(studentName);
+  const parts = compact.split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return [compact];
+  const first = parts[0];
+  const last = parts[parts.length - 1];
+  return [
+    compact,
+    `${first} ${last}`,
+    `${last} ${first}`,
+    `${last}, ${first}`
+  ];
+}
+
+async function submitSchoologyGrades(rows, schoologyConfig) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = `${row.sectionId}|${row.assignmentId}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+
+  for (const [key, groupRows] of groups.entries()) {
+    const [sectionId] = key.split("|");
+    try {
+      await schoologyFetchJson(`/sections/${encodeURIComponent(sectionId)}/grades`, {
+        method: "PUT",
+        body: {
+          grades: {
+            grade: groupRows.map((row) => ({
+              type: "assignment",
+              assignment_id: row.assignmentId,
+              enrollment_id: row.enrollmentId,
+              grade: row.grade,
+              comment: row.comment
+            }))
+          }
+        }
+      }, schoologyConfig);
+      for (const row of groupRows) row.status = "sent";
+    } catch (error) {
+      for (const row of groupRows) {
+        row.status = "send_error";
+        row.error = error.message || String(error);
+      }
+    }
+  }
+}
+
+async function schoologyFetchJson(path, options, schoologyConfig) {
+  const method = options.method || "GET";
+  const apiBase = schoologyConfig.apiBase.replace(/\/+$/, "");
+  const url = new URL(`${apiBase}${path.startsWith("/") ? "" : "/"}${path}`);
+  const bodyText = options.body ? JSON.stringify(options.body) : null;
+  const headers = {
+    Accept: "application/json",
+    Authorization: await buildSchoologyAuthorizationHeader(method, url, schoologyConfig)
+  };
+  if (bodyText) headers["Content-Type"] = "application/json";
+
+  const response = await fetch(url.toString(), {
+    method,
+    headers,
+    body: bodyText
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`Schoology API ${response.status}: ${text || response.statusText}`);
+  }
+  if (!text.trim()) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
+  }
+}
+
+async function buildSchoologyAuthorizationHeader(method, url, schoologyConfig) {
+  const oauthParams = {
+    oauth_consumer_key: schoologyConfig.consumerKey,
+    oauth_nonce: createOAuthNonce(),
+    oauth_signature_method: "HMAC-SHA1",
+    oauth_timestamp: String(Math.floor(Date.now() / 1000)),
+    oauth_version: "1.0"
+  };
+  const signature = await signOAuthRequest(method, url, oauthParams, schoologyConfig.consumerSecret);
+  return "OAuth " + Object.entries({ ...oauthParams, oauth_signature: signature })
+    .map(([key, value]) => `${percentEncode(key)}="${percentEncode(value)}"`)
+    .join(", ");
+}
+
+async function signOAuthRequest(method, url, oauthParams, consumerSecret) {
+  const baseUrl = `${url.protocol}//${url.host}${url.pathname}`;
+  const params = [];
+  for (const [key, value] of url.searchParams.entries()) params.push([key, value]);
+  for (const [key, value] of Object.entries(oauthParams)) params.push([key, value]);
+  params.sort((a, b) => percentEncode(a[0]).localeCompare(percentEncode(b[0])) || percentEncode(a[1]).localeCompare(percentEncode(b[1])));
+
+  const paramString = params.map(([key, value]) => `${percentEncode(key)}=${percentEncode(value)}`).join("&");
+  const signatureBase = [
+    method.toUpperCase(),
+    percentEncode(baseUrl),
+    percentEncode(paramString)
+  ].join("&");
+  const signingKey = `${percentEncode(consumerSecret)}&`;
+  return hmacSha1Base64(signingKey, signatureBase);
+}
+
+async function hmacSha1Base64(key, text) {
+  const encoder = new TextEncoder();
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(key),
+    { name: "HMAC", hash: "SHA-1" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(text));
+  return btoa(String.fromCharCode(...new Uint8Array(signature)));
+}
+
+function createOAuthNonce() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return `${Date.now()}-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function percentEncode(value) {
+  return encodeURIComponent(String(value))
+    .replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function normalizeArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") return [value];
+  return [];
+}
+
+function validateSchoologyConfig(config) {
+  if (!Number.isFinite(config.gradeTargetMinutes) || config.gradeTargetMinutes <= 0) return "Required minutes must be greater than zero.";
+  if (!Number.isFinite(config.gradeMaxPoints) || config.gradeMaxPoints <= 0) return "Max points must be greater than zero.";
+  try {
+    const url = new URL(config.apiBase);
+    if (!/^https:$/i.test(url.protocol)) return "Schoology API base must start with https://.";
+  } catch {
+    return "Schoology API base must be a valid URL.";
+  }
+  if (!config.consumerKey || !config.consumerSecret) return "Enter your Schoology consumer key and consumer secret.";
+  return "";
+}
+
+function renderSchoologyPreview(preview) {
+  const rows = preview?.rows || [];
+  elements.schoologyPreviewTable.className = rows.length ? "table" : "table empty";
+  elements.schoologyPreviewTable.innerHTML = "";
+
+  if (!rows.length) {
+    elements.schoologyPreviewTable.textContent = "No Schoology grade preview yet.";
+    return;
+  }
+
+  const header = document.createElement("div");
+  header.className = "row schoology-preview header";
+  header.innerHTML = "<div>Class</div><div>Khan student</div><div>Schoology match</div><div>Minutes</div><div>Grade</div><div>Status</div>";
+  elements.schoologyPreviewTable.append(header);
+
+  for (const row of rows) {
+    const line = document.createElement("div");
+    line.className = "row schoology-preview";
+    line.innerHTML = `
+      <div>${escapeHtml(row.className || "")}</div>
+      <div>${escapeHtml(row.studentName || "")}</div>
+      <div>${escapeHtml(row.schoologyName || "")}${row.enrollmentId ? `<div class="source">Enrollment ${escapeHtml(row.enrollmentId)}</div>` : ""}</div>
+      <div>${escapeHtml(formatMinutes(row.metricMinutes))}</div>
+      <div>${escapeHtml(row.grade)}</div>
+      <div>${escapeHtml(formatPreviewStatus(row.status))}${row.error ? `<div class="source">${escapeHtml(row.error)}</div>` : ""}</div>
+    `;
+    elements.schoologyPreviewTable.append(line);
+  }
+}
+
+function formatPreviewStatus(status) {
+  return {
+    ready: "Ready",
+    sent: "Sent",
+    missing_section: "Missing section ID",
+    missing_assignment: "Missing assignment ID",
+    no_match: "No Schoology match",
+    send_error: "Send error"
+  }[status] || status || "";
 }
 
 function downloadCsv() {
@@ -1131,7 +1582,10 @@ function setCaptureButtonsDisabled(disabled) {
     elements.captureClassApiButton,
     elements.captureAllClassesButton,
     elements.captureButton,
-    elements.saveClassesButton
+    elements.saveClassesButton,
+    elements.saveSchoologyButton,
+    elements.previewSchoologyButton,
+    elements.sendSchoologyButton
   ].filter(Boolean);
   const previous = buttons.map((button) => ({ button, disabled: button.disabled }));
   for (const button of buttons) button.disabled = disabled;

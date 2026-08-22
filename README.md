@@ -1,8 +1,6 @@
 # Khan Grader
 
-Khan Grader is a Manifest V3 Chrome extension for capturing student activity minutes from Khan Academy.
-
-This first version is intentionally Khan-only. It does not connect to Schoology, Infinite Campus, or any outside server.
+Khan Grader is a Manifest V3 Chrome extension for capturing student activity minutes from Khan Academy, converting those minutes into simple point grades, and sending reviewed grades to an existing Schoology assignment.
 
 ## One-student workflow
 
@@ -47,11 +45,40 @@ For weekly use across multiple classes:
 
 1. Paste each Khan class Roster URL into **Saved Classes**.
 2. Give each class a short class name.
-3. Click **Save Classes**.
-4. Choose the start and end dates.
-5. Click **Capture All Classes**.
+3. Add the matching Schoology section ID and Schoology assignment ID for each class.
+4. Click **Save Classes**.
+5. Choose the start and end dates.
+6. Click **Capture All Classes**.
 
 The extension opens each saved roster page in a temporary Chrome tab, captures that class, closes the temporary tab, then combines all rows into one table and CSV. The saved class list stays in `chrome.storage.local` on this Chrome profile.
+
+## Schoology grade workflow
+
+Schoology writes are review-first. Capturing Khan data does not send anything to Schoology.
+
+1. Enter the grading settings in **Grading & Schoology**:
+   - Grade from: Time on task or Exercises
+   - Required minutes
+   - Max points
+2. Enter the Schoology API base, consumer key, and consumer secret.
+3. Click **Save Settings**.
+4. Capture Khan rows with **Capture All Classes**.
+5. Click **Preview Schoology Grades**.
+6. Review each row for:
+   - Khan student name
+   - Schoology matched enrollment
+   - minutes
+   - calculated grade
+   - status
+7. Click **Send Grades to Schoology** only after the preview is correct.
+
+The grade formula is:
+
+```text
+grade = min(max points, round(minutes / required minutes * max points))
+```
+
+The first Schoology version uses existing assignment IDs. It does not create Schoology assignments automatically.
 
 ## Network probe
 
@@ -70,9 +97,10 @@ The probe runs only in the current browser session and stores output locally in 
 
 - Student data stays in `chrome.storage.local` on the browser profile where the extension is installed.
 - The extension does not store Google passwords.
-- The extension does not send Khan data to a remote server.
-- The extension only requests access to Khan Academy pages.
+- Schoology API keys are stored in `chrome.storage.local` on this Chrome profile.
+- Khan data is only sent to Schoology after clicking **Send Grades to Schoology** and confirming the write.
+- The extension requests access to Khan Academy pages and the official Schoology API host.
 
 ## Status
 
-This is a capture proof of concept. The current milestone is structured API capture for one student from the Individual Student Report and full-class capture from the Khan Roster page.
+This is still an early teacher workflow tool. Khan capture, local grade preview, Schoology enrollment matching, and reviewed Schoology grade writes are implemented. Assignment creation and Infinite Campus work are intentionally out of scope because the Schoology-to-Infinite-Campus sync handles the final step.

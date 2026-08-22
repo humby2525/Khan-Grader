@@ -13,7 +13,7 @@
           <h1>Khan Grader</h1>
           <p>Capture Khan Academy class or student activity minutes.</p>
         </div>
-        <span id="build">v0.8.1</span>
+        <span id="build">v0.9.0</span>
       </header>
 
       <section class="panel controls">
@@ -46,18 +46,26 @@
         <div class="class-grid header">
           <div>Class</div>
           <div>Khan roster URL</div>
+          <div>Schoology section ID</div>
+          <div>Schoology assignment ID</div>
         </div>
         <div class="class-grid">
           <input id="className1" type="text" placeholder="Class 1 name">
           <input id="classUrl1" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster">
+          <input id="classSectionId1" type="text" inputmode="numeric" placeholder="Section ID">
+          <input id="classAssignmentId1" type="text" inputmode="numeric" placeholder="Assignment ID">
         </div>
         <div class="class-grid">
           <input id="className2" type="text" placeholder="Class 2 name">
           <input id="classUrl2" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster">
+          <input id="classSectionId2" type="text" inputmode="numeric" placeholder="Section ID">
+          <input id="classAssignmentId2" type="text" inputmode="numeric" placeholder="Assignment ID">
         </div>
         <div class="class-grid">
           <input id="className3" type="text" placeholder="Class 3 name">
           <input id="classUrl3" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster">
+          <input id="classSectionId3" type="text" inputmode="numeric" placeholder="Section ID">
+          <input id="classAssignmentId3" type="text" inputmode="numeric" placeholder="Assignment ID">
         </div>
       </section>
 
@@ -90,6 +98,47 @@
           <button id="downloadButton" class="secondary" type="button" disabled>Download CSV</button>
         </div>
         <div id="studentSummaryTable" class="table empty">No student report captured yet.</div>
+      </section>
+
+      <section class="panel">
+        <div class="section-header">
+          <h2>Grading & Schoology</h2>
+          <div class="button-row">
+            <button id="saveSchoologyButton" class="secondary" type="button">Save Settings</button>
+            <button id="previewSchoologyButton" type="button">Preview Schoology Grades</button>
+            <button id="sendSchoologyButton" type="button">Send Grades to Schoology</button>
+          </div>
+        </div>
+        <div class="schoology-grid">
+          <label>
+            Grade from
+            <select id="gradeMetric">
+              <option value="timeOnTaskMinutes">Time on task</option>
+              <option value="exerciseMinutes">Exercises</option>
+            </select>
+          </label>
+          <label>
+            Required minutes
+            <input id="gradeTargetMinutes" type="number" min="1" step="1" value="50">
+          </label>
+          <label>
+            Max points
+            <input id="gradeMaxPoints" type="number" min="1" step="1" value="100">
+          </label>
+          <label>
+            API base
+            <input id="schoologyApiBase" type="url" value="https://api.schoology.com/v1">
+          </label>
+          <label>
+            Consumer key
+            <input id="schoologyConsumerKey" type="text" autocomplete="off">
+          </label>
+          <label>
+            Consumer secret
+            <input id="schoologyConsumerSecret" type="password" autocomplete="off">
+          </label>
+        </div>
+        <div id="schoologyPreviewTable" class="table empty">No Schoology grade preview yet.</div>
       </section>
 
       <section class="panel">
