@@ -1,0 +1,7 @@
+*.zip
+*.crx
+*.pem
+exports/
+captures/
+.DS_Store
+Thumbs.db

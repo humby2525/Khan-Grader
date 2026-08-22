@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Khan Grader",
+  "description": "Capture Khan Academy activity report learning minutes for teacher review.",
+  "version": "0.1.0",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://khanacademy.org/*",
+    "https://*.khanacademy.org/*"
+  ],
+  "action": {
+    "default_title": "Khan Grader"
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://khanacademy.org/*",
+        "https://*.khanacademy.org/*"
+      ],
+      "js": [
+        "src/content/khanCapture.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}
