@@ -109,6 +109,7 @@
           <h2>Grading & Schoology</h2>
           <div class="button-row">
             <button id="saveSchoologyButton" class="secondary" type="button">Save Settings</button>
+            <button id="loadSchoologyOptionsButton" class="secondary" type="button">Load Grade Options</button>
             <button id="prepareAssignmentsButton" class="secondary" type="button">Find/Create Assignments</button>
             <button id="previewSchoologyButton" type="button">Preview Schoology Grades</button>
             <button id="previewSchoologyTestButton" class="secondary" type="button">Preview Test Grades</button>
@@ -137,11 +138,29 @@
           </label>
           <label>
             Assignment title
-            <input id="assignmentTitleTemplate" type="text" value="Khan Active Minutes - Week of {startDate}">
+            <input id="assignmentTitleTemplate" type="text" value="Khan Minutes - Week of {startDate}">
+          </label>
+          <label>
+            Due date
+            <input id="assignmentDueDate" type="date">
           </label>
           <label>
             Due time
             <input id="assignmentDueTime" type="time" value="23:59">
+          </label>
+          <label>
+            Grading category ID
+            <input id="assignmentCategoryId" type="text" inputmode="numeric" list="assignmentCategoryOptions" placeholder="Schoology default">
+            <datalist id="assignmentCategoryOptions"></datalist>
+          </label>
+          <label>
+            Grading period ID
+            <input id="assignmentPeriodId" type="text" inputmode="numeric" list="assignmentPeriodOptions" placeholder="Schoology default">
+            <datalist id="assignmentPeriodOptions"></datalist>
+          </label>
+          <label>
+            Grading task ID
+            <input id="assignmentGradingTaskId" type="text" inputmode="numeric" placeholder="Optional">
           </label>
           <label>
             API base

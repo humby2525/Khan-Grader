@@ -1,4 +1,6 @@
-const BUILD_VERSION = "0.10.3";
+const BUILD_VERSION = "0.11.0";
+const DEFAULT_ASSIGNMENT_TITLE_TEMPLATE = "Khan Minutes - Week of {startDate}";
+const LEGACY_ASSIGNMENT_TITLE_TEMPLATE = "Khan Active Minutes - Week of {startDate}";
 const STORAGE_KEY = "khanGrader.lastCapture";
 const CLASS_CONFIG_STORAGE_KEY = "khanGrader.classConfigs";
 const SCHOOLOGY_CONFIG_STORAGE_KEY = "khanGrader.schoologyConfig";
@@ -25,6 +27,7 @@ async function init() {
   elements.openKhanButton.addEventListener("click", () => chrome.tabs.create({ url: "https://classroom.khanacademy.org/" }));
   elements.saveClassesButton.addEventListener("click", saveClassConfigs);
   elements.saveSchoologyButton.addEventListener("click", saveSchoologyConfig);
+  elements.loadSchoologyOptionsButton.addEventListener("click", loadSchoologyAssignmentOptions);
   elements.prepareAssignmentsButton.addEventListener("click", prepareSchoologyAssignments);
   elements.previewSchoologyButton.addEventListener("click", previewSchoologyGrades);
   elements.previewSchoologyTestButton.addEventListener("click", previewSchoologyTestGrades);
@@ -98,8 +101,12 @@ function loadSchoologyConfig(config) {
   elements.gradeTargetMinutes.value = config.gradeTargetMinutes || 50;
   elements.gradeMaxPoints.value = config.gradeMaxPoints || 100;
   elements.schoologyTestMinutes.value = config.testMinutes ?? 50;
-  elements.assignmentTitleTemplate.value = config.assignmentTitleTemplate || "Khan Active Minutes - Week of {startDate}";
+  elements.assignmentTitleTemplate.value = getStoredAssignmentTitleTemplate(config.assignmentTitleTemplate);
+  elements.assignmentDueDate.value = config.assignmentDueDate || "";
   elements.assignmentDueTime.value = config.assignmentDueTime || "23:59";
+  elements.assignmentCategoryId.value = config.assignmentCategoryId || "";
+  elements.assignmentPeriodId.value = config.assignmentPeriodId || "";
+  elements.assignmentGradingTaskId.value = config.assignmentGradingTaskId || "";
   elements.schoologyApiBase.value = config.apiBase || "https://api.schoology.com/v1";
   elements.schoologyConsumerKey.value = config.consumerKey || "";
   elements.schoologyConsumerSecret.value = config.consumerSecret || "";
@@ -111,12 +118,23 @@ function readSchoologyConfig() {
     gradeTargetMinutes: Number(elements.gradeTargetMinutes.value || 50),
     gradeMaxPoints: Number(elements.gradeMaxPoints.value || 100),
     testMinutes: Number(elements.schoologyTestMinutes.value || 0),
-    assignmentTitleTemplate: compactText(elements.assignmentTitleTemplate.value) || "Khan Active Minutes - Week of {startDate}",
+    assignmentTitleTemplate: compactText(elements.assignmentTitleTemplate.value) || DEFAULT_ASSIGNMENT_TITLE_TEMPLATE,
+    assignmentDueDate: compactText(elements.assignmentDueDate.value),
     assignmentDueTime: compactText(elements.assignmentDueTime.value) || "23:59",
+    assignmentCategoryId: compactText(elements.assignmentCategoryId.value),
+    assignmentPeriodId: compactText(elements.assignmentPeriodId.value),
+    assignmentGradingTaskId: compactText(elements.assignmentGradingTaskId.value),
     apiBase: compactText(elements.schoologyApiBase.value) || "https://api.schoology.com/v1",
     consumerKey: compactText(elements.schoologyConsumerKey.value),
     consumerSecret: compactText(elements.schoologyConsumerSecret.value)
   };
+}
+
+function getStoredAssignmentTitleTemplate(value) {
+  const title = compactText(value);
+  return !title || title === LEGACY_ASSIGNMENT_TITLE_TEMPLATE
+    ? DEFAULT_ASSIGNMENT_TITLE_TEMPLATE
+    : title;
 }
 
 async function saveSchoologyConfig() {
@@ -129,6 +147,54 @@ async function saveSchoologyConfig() {
 
   await chrome.storage.local.set({ [SCHOOLOGY_CONFIG_STORAGE_KEY]: config });
   setStatus("Saved grading and Schoology settings on this Chrome profile.");
+}
+
+async function loadSchoologyAssignmentOptions() {
+  const schoologyConfig = readSchoologyConfig();
+  const validation = validateSchoologyConfig(schoologyConfig);
+  if (validation) {
+    setError(validation);
+    return;
+  }
+
+  const classConfigs = readClassConfigs();
+  const classConfig = classConfigs.find((config) => config.schoologySectionId);
+  if (!classConfig) {
+    setError("Add at least one Schoology section ID before loading grade options.");
+    return;
+  }
+
+  await chrome.storage.local.set({
+    [CLASS_CONFIG_STORAGE_KEY]: classConfigs,
+    [SCHOOLOGY_CONFIG_STORAGE_KEY]: schoologyConfig
+  });
+
+  const previousDisabled = setCaptureButtonsDisabled(true);
+  try {
+    setStatus(`Loading Schoology grade options for ${classConfig.name || "the first section"}...`);
+    const [categories, gradingPeriods] = await Promise.all([
+      fetchSchoologyGradingCategories(classConfig.schoologySectionId, schoologyConfig),
+      fetchSchoologyGradingPeriods(classConfig.schoologySectionId, schoologyConfig)
+    ]);
+    populateSchoologyIdOptions(elements.assignmentCategoryOptions, categories);
+    populateSchoologyIdOptions(elements.assignmentPeriodOptions, gradingPeriods);
+
+    lastNetworkProbe = {
+      build: BUILD_VERSION,
+      type: "schoology-grade-options",
+      sectionId: classConfig.schoologySectionId,
+      className: classConfig.name || "",
+      categories,
+      gradingPeriods,
+      note: "Schoology's public assignment API documents grading_category and grading_period. Grading task is not exposed in these option endpoints."
+    };
+    elements.networkProbe.textContent = JSON.stringify(lastNetworkProbe, null, 2);
+    setStatus(`Loaded ${categories.length} categor${categories.length === 1 ? "y" : "ies"} and ${gradingPeriods.length} grading period${gradingPeriods.length === 1 ? "" : "s"}. Use the dropdown suggestions in the ID fields.`);
+  } catch (error) {
+    setError(error.message || String(error));
+  } finally {
+    restoreCaptureButtonsDisabled(previousDisabled);
+  }
 }
 
 async function startNetworkProbe() {
@@ -1214,7 +1280,8 @@ function getCapturedStudentSummaries() {
 
 async function findOrCreateSchoologyAssignments(classConfigs, schoologyConfig, startDate, endDate) {
   const title = renderAssignmentTitle(schoologyConfig.assignmentTitleTemplate, startDate, endDate);
-  const due = formatSchoologyDueDate(endDate, schoologyConfig.assignmentDueTime);
+  const dueDate = schoologyConfig.assignmentDueDate || endDate;
+  const due = formatSchoologyDueDate(dueDate, schoologyConfig.assignmentDueTime);
   const rows = [];
 
   for (const classConfig of classConfigs) {
@@ -1301,23 +1368,42 @@ async function fetchSchoologyAssignment(sectionId, assignmentId, schoologyConfig
   }, schoologyConfig);
 }
 
+async function fetchSchoologyGradingCategories(sectionId, schoologyConfig) {
+  const json = await schoologyFetchJson(`/sections/${encodeURIComponent(sectionId)}/grading_categories`, {
+    method: "GET"
+  }, schoologyConfig);
+  return normalizeSchoologyCollection(json, ["grading_category", "grading_categories"]);
+}
+
+async function fetchSchoologyGradingPeriods(sectionId, schoologyConfig) {
+  const json = await schoologyFetchJson(`/sections/${encodeURIComponent(sectionId)}/grading_periods`, {
+    method: "GET"
+  }, schoologyConfig);
+  return normalizeSchoologyCollection(json, ["grading_period", "grading_periods", "gradingperiods"]);
+}
+
 async function createSchoologyAssignment(classConfig, schoologyConfig, title, due) {
   const targetMinutes = resolveTargetMinutes(classConfig, schoologyConfig.gradeTargetMinutes);
+  const body = {
+    title,
+    description: `Make sure you spend ${targetMinutes} minutes on Khan this week.`,
+    due,
+    max_points: schoologyConfig.gradeMaxPoints,
+    factor: 1,
+    published: 1,
+    count_in_grade: 1,
+    auto_publish_grades: 1,
+    show_comments: 1,
+    allow_dropbox: 0,
+    allow_discussion: 0
+  };
+  addOptionalSchoologyId(body, "grading_category", schoologyConfig.assignmentCategoryId);
+  addOptionalSchoologyId(body, "grading_period", schoologyConfig.assignmentPeriodId);
+  addOptionalSchoologyId(body, "grading_task", schoologyConfig.assignmentGradingTaskId);
+
   const json = await schoologyFetchJson(`/sections/${encodeURIComponent(classConfig.schoologySectionId)}/assignments`, {
     method: "POST",
-    body: {
-      title,
-      description: `Make sure you spend ${targetMinutes} minutes on Khan this week.`,
-      due,
-      max_points: schoologyConfig.gradeMaxPoints,
-      factor: 1,
-      published: 1,
-      count_in_grade: 1,
-      auto_publish_grades: 1,
-      show_comments: 1,
-      allow_dropbox: 0,
-      allow_discussion: 0
-    }
+    body
   }, schoologyConfig);
   if (!json?.id && !json?.grade_item_id) {
     throw new Error(`Schoology created an assignment for ${classConfig.name}, but did not return an assignment ID.`);
@@ -1330,6 +1416,9 @@ function summarizeSchoologyAssignment(assignment) {
     verifiedTitle: assignment?.title || "",
     due: assignment?.due || "",
     maxPoints: assignment?.max_points ?? "",
+    gradingCategory: assignment?.grading_category ?? "",
+    gradingPeriod: assignment?.grading_period ?? "",
+    gradingTask: assignment?.grading_task ?? "",
     published: assignment?.published ?? "",
     available: assignment?.available ?? "",
     countInGrade: assignment?.count_in_grade ?? "",
@@ -1371,7 +1460,7 @@ function renderAssignmentTitle(template, startDate, endDate) {
     startIso: startDate,
     endIso: endDate
   };
-  return compactText((template || "Khan Active Minutes - Week of {startDate}")
+  return compactText((template || DEFAULT_ASSIGNMENT_TITLE_TEMPLATE)
     .replace(/\{startDate\}/g, values.startDate)
     .replace(/\{endDate\}/g, values.endDate)
     .replace(/\{startIso\}/g, values.startIso)
@@ -1648,12 +1737,42 @@ function normalizeArray(value) {
   return [];
 }
 
+function normalizeSchoologyCollection(json, keys) {
+  for (const key of keys) {
+    const rows = normalizeArray(json?.[key]);
+    if (rows.length) return rows;
+  }
+  return [];
+}
+
+function populateSchoologyIdOptions(datalist, rows) {
+  datalist.innerHTML = "";
+  for (const row of rows) {
+    if (row?.id === undefined || row?.id === null || row.id === "") continue;
+    const option = document.createElement("option");
+    option.value = String(row.id);
+    option.label = compactText(row.title || row.name || "");
+    option.textContent = option.label ? `${option.label} (${option.value})` : option.value;
+    datalist.append(option);
+  }
+}
+
+function addOptionalSchoologyId(body, fieldName, value) {
+  const id = compactText(value);
+  if (!id) return;
+  body[fieldName] = /^\d+$/.test(id) ? Number(id) : id;
+}
+
 function validateSchoologyConfig(config) {
   if (!Number.isFinite(config.gradeTargetMinutes) || config.gradeTargetMinutes <= 0) return "Required minutes must be greater than zero.";
   if (!Number.isFinite(config.gradeMaxPoints) || config.gradeMaxPoints <= 0) return "Max points must be greater than zero.";
   if (!Number.isFinite(config.testMinutes) || config.testMinutes < 0) return "Test minutes must be zero or greater.";
   if (!config.assignmentTitleTemplate) return "Enter an assignment title template.";
+  if (config.assignmentDueDate && !isValidDateInput(config.assignmentDueDate)) return "Due date must be blank or a valid date.";
   if (!/^\d{2}:\d{2}$/.test(config.assignmentDueTime || "")) return "Due time must be in HH:MM format.";
+  if (config.assignmentCategoryId && !/^\d+$/.test(config.assignmentCategoryId)) return "Grading category ID must be blank or a number.";
+  if (config.assignmentPeriodId && !/^\d+$/.test(config.assignmentPeriodId)) return "Grading period ID must be blank or a number.";
+  if (config.assignmentGradingTaskId && !/^[A-Za-z0-9_-]+$/.test(config.assignmentGradingTaskId)) return "Grading task ID must be blank or an ID value.";
   try {
     const url = new URL(config.apiBase);
     if (!/^https:$/i.test(url.protocol)) return "Schoology API base must start with https://.";
@@ -1662,6 +1781,12 @@ function validateSchoologyConfig(config) {
   }
   if (!config.consumerKey || !config.consumerSecret) return "Enter your Schoology consumer key and consumer secret.";
   return "";
+}
+
+function isValidDateInput(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return false;
+  const parsed = parseLocalDate(value);
+  return toDateInput(parsed) === value;
 }
 
 function validateClassTargetMinutes(configs) {
@@ -1720,13 +1845,22 @@ function renderAssignmentResults(result) {
     line.className = "row assignment-preview";
     line.innerHTML = `
       <div>${escapeHtml(row.className || "")}</div>
-      <div>${escapeHtml(row.verifiedTitle || row.title || "")}<div class="source">${escapeHtml(row.due ? `Due ${row.due}` : "")}</div></div>
+      <div>${escapeHtml(row.verifiedTitle || row.title || "")}<div class="source">${escapeHtml(formatAssignmentDetails(row))}</div></div>
       <div>${escapeHtml(row.assignmentId || "")}</div>
       <div>${escapeHtml(formatAssignmentVisibility(row))}</div>
       <div>${escapeHtml(formatAssignmentStatus(row.status))}${row.skipReason ? `<div class="source">${escapeHtml(row.skipReason)}</div>` : ""}${row.selfLink ? `<div class="source">${escapeHtml(row.selfLink)}</div>` : ""}${row.error ? `<div class="source">${escapeHtml(row.error)}</div>` : ""}</div>
     `;
     elements.assignmentTable.append(line);
   }
+}
+
+function formatAssignmentDetails(row) {
+  return [
+    row.due ? `Due ${row.due}` : "",
+    row.gradingCategory !== "" && row.gradingCategory !== undefined ? `Category ${row.gradingCategory}` : "",
+    row.gradingPeriod !== "" && row.gradingPeriod !== undefined ? `Period ${row.gradingPeriod}` : "",
+    row.gradingTask !== "" && row.gradingTask !== undefined ? `Task ${row.gradingTask}` : ""
+  ].filter(Boolean).join(" / ");
 }
 
 function formatAssignmentVisibility(row) {
@@ -1971,6 +2105,7 @@ function setCaptureButtonsDisabled(disabled) {
     elements.captureButton,
     elements.saveClassesButton,
     elements.saveSchoologyButton,
+    elements.loadSchoologyOptionsButton,
     elements.prepareAssignmentsButton,
     elements.previewSchoologyButton,
     elements.previewSchoologyTestButton,
