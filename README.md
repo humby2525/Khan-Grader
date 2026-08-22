@@ -1,10 +1,10 @@
 # Khan Grader
 
-Khan Grader is a Manifest V3 Chrome extension for capturing student minutes from Khan Academy's Individual Student Report.
+Khan Grader is a Manifest V3 Chrome extension for capturing student activity minutes from Khan Academy.
 
 This first version is intentionally Khan-only. It does not connect to Schoology, Infinite Campus, or any outside server.
 
-## Current workflow
+## One-student workflow
 
 1. Open Khan Academy.
 2. Go to Reports -> Individual Student Report -> Activity log.
@@ -19,16 +19,25 @@ The older **Capture Current Student** button is still available as a rendered-pa
 
 ## Class API capture
 
-After the one-student API capture works, test **Capture Class via Khan API** from the same Individual Student Report page.
+For a full class, start from the Khan class **Roster** page. That page exposes the student list more reliably than the Individual Student Report switcher.
 
 The class capture:
 
-1. Looks for student Khan IDs on the current report page.
-2. Opens the Khan **Switch student** control if it can find it.
+1. Looks for student Khan IDs on the current Khan page, preferably the class Roster page.
+2. Opens the Khan **Switch student** control as a fallback if needed.
 3. Collects every student `kaid` it can see.
 4. If the IDs are not exposed directly, it clicks through the visible Switch-student options and reads each student's URL.
 5. Requests the same start/end date report for each student.
 6. Displays one row per student and exports a class CSV.
+
+Recommended class workflow:
+
+1. Open Khan Academy.
+2. Go to your class **Roster** page.
+3. Open Khan Grader.
+4. Choose the start and end dates.
+5. Click **Capture Class via Khan API**.
+6. Download the CSV if the rows look right.
 
 If Khan does not expose the roster directly, the Khan tab may visibly move from student to student during capture. Leave the Khan tab open until the extension finishes.
 
@@ -54,4 +63,4 @@ The probe runs only in the current browser session and stores output locally in 
 
 ## Status
 
-This is a capture proof of concept. The current milestone is structured API capture from the Individual Student Report, first for one student and then for every student whose Khan ID is discoverable from the Switch student control.
+This is a capture proof of concept. The current milestone is structured API capture for one student from the Individual Student Report and full-class capture from the Khan Roster page.

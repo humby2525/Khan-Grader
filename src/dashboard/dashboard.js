@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.7.0";
+const BUILD_VERSION = "0.7.1";
 const STORAGE_KEY = "khanGrader.lastCapture";
 
 const elements = {};
@@ -212,11 +212,11 @@ async function captureClassViaApi() {
 
   const tab = await findKhanTab();
   if (!tab?.id) {
-    setError("Open the Khan Individual Student Report tab before using the Khan class API capture.");
+    setError("Open the Khan class Roster page or an Individual Student Report tab before using the Khan class API capture.");
     return;
   }
 
-  setStatus("Looking for students in the Khan Switch student control...");
+  setStatus("Looking for students on the Khan roster page or in the Switch student control...");
 
   try {
     const rosterResult = await collectKhanRoster(tab);
