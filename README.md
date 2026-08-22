@@ -34,7 +34,7 @@ Recommended class workflow:
 2. Go to your class **Roster** page.
 3. Open Khan Grader.
 4. Choose the start and end dates.
-5. Click **Capture Class via Khan API**.
+5. Open **Individual Khan tools** and click **Capture Current Class**.
 6. Download the CSV if the rows look right.
 
 If Khan does not expose the roster directly, the Khan tab may visibly move from student to student during capture. Leave the Khan tab open until the extension finishes.
@@ -43,13 +43,13 @@ If Khan does not expose the roster directly, the Khan tab may visibly move from 
 
 For weekly use across multiple classes:
 
-1. Paste each Khan class Roster URL into **Saved Classes**.
+1. Open **Setup** and paste each Khan class roster URL into **Classes**.
 2. Give each class a short class name.
 3. Optionally add class-specific goal minutes. Blank uses the default required minutes.
-4. Add the matching Schoology section ID for each class. Assignment ID can be filled manually or created with **Find/Create Assignments**.
+4. Add the matching Schoology section ID for each class.
 5. Click **Save Classes**.
 6. Choose the start and end dates.
-7. Click **Capture All Classes**.
+7. Click **Capture Minutes**.
 
 The extension opens each saved roster page in a temporary Chrome tab, captures that class, closes the temporary tab, then combines all rows into one table and CSV. The saved class list stays in `chrome.storage.local` on this Chrome profile.
 
@@ -57,23 +57,23 @@ The extension opens each saved roster page in a temporary Chrome tab, captures t
 
 Schoology writes are review-first. Capturing Khan data does not send anything to Schoology.
 
-1. Enter the grading settings in **Grading & Schoology**:
+1. Open **Setup** and enter the settings under **Assignment & Grading**:
    - Grade from: Time on task or Exercises
    - Default required minutes
    - Max points
    - Assignment due date and due time
    - Grading category, grading task, and grading period, if your Schoology setup requires them
-2. Enter the Schoology API base, consumer key, and consumer secret.
-3. Click **Save Settings**.
-4. Capture Khan rows with **Capture All Classes**.
-5. Click **Preview Schoology Grades**.
+2. Enter the API base, consumer key, and consumer secret under **Schoology Connection**.
+3. Click **Save Schoology Settings**.
+4. Capture Khan rows with **Capture Minutes**.
+5. Click **Review Grades**.
 6. Review each row for:
    - Khan student name
    - Schoology matched enrollment
    - minutes
    - calculated grade
    - status
-7. Click **Send Grades to Schoology** only after the preview is correct.
+7. Click **Send Grades** only after the preview is correct.
 
 The grade formula is:
 
@@ -85,12 +85,12 @@ Each saved class can have its own goal minutes. If a class goal is blank, the ex
 
 ## Prepare Schoology assignments
 
-Use **Find/Create Assignments** before the week starts if you want students to see the Khan assignment in Schoology.
+Use **Create Assignments** before the week starts if you want students to see the Khan assignment in Schoology.
 
 Set up Schoology choices once for each class:
 
-1. Enter the Schoology API key and secret under **Grading & Schoology**, then save the settings.
-2. Add each class's Schoology section ID under **Class Setup**.
+1. Enter the Schoology API key and secret under **Setup**, then save the Schoology settings.
+2. Add each class's Schoology section ID under **Classes**.
 3. Click **Refresh Categories & Periods** to load the category and grading-period choices from each section.
 4. Choose the category and period for each class, enter its task ID if needed, and click **Save Classes**.
 5. Refresh these choices again only when adding a class or changing to a new marking period.
@@ -100,13 +100,13 @@ For each weekly assignment:
 1. Choose the week start and end dates.
 2. Enter an assignment title template, such as `Khan Minutes - Week of {startDate}`.
 3. Enter a due date and due time. If due date is blank, the extension uses the selected week end date.
-4. Click **Find/Create Assignments**.
+4. Click **Create Assignments**.
 
 The extension checks each section for an existing assignment with the exact same title. If it finds one, it reuses that assignment ID only when it also matches the selected assignment settings. If it does not find one, it creates a published, count-in-grade assignment using the max points, due date, due time, grading category, and grading period from the grading settings and saves the returned assignment ID internally. The assignment description tells students to spend the class goal minutes on Khan that week.
 
-Schoology category, period, and task IDs can differ by section even when the visible name is the same. For that reason, category, period, and optional task ID are saved with each class. The assignment ID is hidden because the extension manages it after **Find/Create Assignments**.
+Schoology category, period, and task IDs can differ by section even when the visible name is the same. For that reason, category, period, and optional task ID are saved with each class. The assignment ID is hidden because the extension manages it after **Create Assignments**.
 
-After finding or creating each assignment, the extension fetches it back from Schoology and shows the published, available, count-in-grade, due date, category, period, points, and API self link in the assignment results table. If Schoology still returns an old matching title that is not usable, the extension marks it as skipped and creates a new assignment. If the Schoology page does not show the assignment, copy the Network Probe output after running **Find/Create Assignments**.
+After finding or creating each assignment, the extension fetches it back from Schoology and shows the published, available, count-in-grade, due date, category, period, points, and API self link in the assignment results table. If Schoology still returns an old matching title that is not usable, the extension marks it as skipped and creates a new assignment. If the Schoology page does not show the assignment, copy the Network Probe output after running **Create Assignments**.
 
 Schoology's public assignment API documents `grading_category` and `grading_period` for assignment creation. It does not document a matching assignment field or option endpoint for the Schoology UI's grading task dropdown. The extension includes the optional per-class task ID in assignment creation, but your Schoology tenant may reject or ignore it.
 
@@ -123,11 +123,11 @@ Supported title placeholders:
 
 Use this when Schoology has the current roster but Khan does not yet.
 
-1. Use **Find/Create Assignments** to create a temporary test assignment.
+1. Use **Create Assignments** to create a temporary test assignment.
 2. Enter a fake value in **Test minutes**.
 3. Click **Preview Test Grades**.
 4. Confirm that the roster names, enrollment IDs, and calculated grades look right.
-5. Click **Send Grades to Schoology** only if the created assignment is a test assignment.
+5. Click **Send Grades** only if the created assignment is a test assignment.
 
 This test mode does not use Khan data. It pulls active member enrollments from Schoology, calculates grades from the fake test minutes value, and writes comments beginning with `TEST Khan Grader`.
 
@@ -149,7 +149,7 @@ The probe runs only in the current browser session and stores output locally in 
 - Student data stays in `chrome.storage.local` on the browser profile where the extension is installed.
 - The extension does not store Google passwords.
 - Schoology API keys are stored in `chrome.storage.local` on this Chrome profile.
-- Khan data is only sent to Schoology after clicking **Send Grades to Schoology** and confirming the write.
+- Khan data is only sent to Schoology after clicking **Send Grades** and confirming the write.
 - The extension requests access to Khan Academy pages and the official Schoology API host.
 
 ## Status

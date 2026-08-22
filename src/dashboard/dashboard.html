@@ -11,16 +11,16 @@
       <header class="topbar">
         <div>
           <h1>Khan Grader</h1>
-          <p>Capture Khan Academy class or student activity minutes.</p>
+          <p>Khan Academy minutes to Schoology grades.</p>
         </div>
-        <span id="build">v0.10.3</span>
+        <span id="build">v0.15.0</span>
       </header>
 
-      <section class="panel">
+      <section class="panel weekly-panel">
         <div class="section-header">
-          <h2>Weekly Workflow</h2>
+          <h2>Weekly Run</h2>
         </div>
-        <div class="workflow-grid">
+        <div class="week-picker">
           <label>
             Week start
             <input id="weekStart" type="date">
@@ -29,94 +29,47 @@
             Week end
             <input id="weekEnd" type="date">
           </label>
-          <button id="captureAllClassesButton" type="button">Capture All Classes</button>
-          <button id="prepareAssignmentsButton" type="button">Find/Create Assignments</button>
-          <button id="previewSchoologyButton" type="button">Preview Grades</button>
-          <button id="sendSchoologyButton" type="button">Send Grades</button>
+        </div>
+        <div class="workflow-actions">
+          <button id="prepareAssignmentsButton" class="workflow-action" type="button">
+            <span class="step-number">1</span>
+            <span><strong>Create Assignments</strong><small>Before the week</small></span>
+          </button>
+          <button id="captureAllClassesButton" class="workflow-action" type="button">
+            <span class="step-number">2</span>
+            <span><strong>Capture Minutes</strong><small>After the week</small></span>
+          </button>
+          <button id="previewSchoologyButton" class="workflow-action" type="button">
+            <span class="step-number">3</span>
+            <span><strong>Review Grades</strong><small>Check student matches</small></span>
+          </button>
+          <button id="sendSchoologyButton" class="workflow-action send" type="button">
+            <span class="step-number">4</span>
+            <span><strong>Send Grades</strong><small>Publish to Schoology</small></span>
+          </button>
         </div>
         <details class="advanced-options compact">
-          <summary>Khan tools</summary>
+          <summary>Individual Khan tools</summary>
           <div class="button-row">
             <button id="openKhanButton" class="secondary" type="button">Open Khan Reports</button>
-            <button id="captureClassApiButton" class="secondary" type="button">Capture Current Khan Class</button>
-            <button id="captureApiButton" class="secondary" type="button">Capture Current Khan Student API</button>
-            <button id="captureButton" class="secondary" type="button">Capture Current Student Page</button>
+            <button id="captureClassApiButton" class="secondary" type="button">Capture Current Class</button>
+            <button id="captureApiButton" class="secondary" type="button">Capture Current Student</button>
+            <button id="captureButton" class="secondary" type="button">Read Current Page</button>
             <button id="startNetworkProbeButton" class="secondary" type="button">Start Network Probe</button>
             <button id="collectNetworkProbeButton" class="secondary" type="button">Collect Network Probe</button>
           </div>
         </details>
       </section>
 
-      <p id="status" class="status">Choose the week, confirm your saved classes, then use the Weekly Workflow buttons from left to right.</p>
+      <p id="status" class="status" role="status" aria-live="polite">Choose the week, then start with Create Assignments.</p>
 
-      <section class="panel">
-        <div class="section-header">
-          <h2>Class Setup</h2>
-          <div class="button-row">
-            <button id="loadSchoologyOptionsButton" class="secondary" type="button">Refresh Categories &amp; Periods</button>
-            <button id="saveClassesButton" class="secondary" type="button">Save Classes</button>
-          </div>
-        </div>
-        <div class="class-grid header">
-          <div>Class</div>
-          <div>Khan roster URL</div>
-          <div>Goal minutes</div>
-          <div>Schoology section ID</div>
-          <div>Grading category</div>
-          <div>Grading period</div>
-          <div>Task ID</div>
-        </div>
-        <div class="class-grid">
-          <input id="className1" type="text" placeholder="Class 1 name">
-          <input id="classUrl1" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster">
-          <input id="classTargetMinutes1" type="number" min="1" step="1" placeholder="Default">
-          <input id="classSectionId1" type="text" inputmode="numeric" placeholder="Section ID">
-          <select id="classCategoryName1">
-            <option value="">Schoology default</option>
-          </select>
-          <select id="classPeriodName1">
-            <option value="">Schoology default</option>
-          </select>
-          <input id="classGradingTaskId1" type="text" inputmode="numeric" placeholder="Optional">
-          <input id="classAssignmentId1" type="hidden">
-        </div>
-        <div class="class-grid">
-          <input id="className2" type="text" placeholder="Class 2 name">
-          <input id="classUrl2" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster">
-          <input id="classTargetMinutes2" type="number" min="1" step="1" placeholder="Default">
-          <input id="classSectionId2" type="text" inputmode="numeric" placeholder="Section ID">
-          <select id="classCategoryName2">
-            <option value="">Schoology default</option>
-          </select>
-          <select id="classPeriodName2">
-            <option value="">Schoology default</option>
-          </select>
-          <input id="classGradingTaskId2" type="text" inputmode="numeric" placeholder="Optional">
-          <input id="classAssignmentId2" type="hidden">
-        </div>
-        <div class="class-grid">
-          <input id="className3" type="text" placeholder="Class 3 name">
-          <input id="classUrl3" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster">
-          <input id="classTargetMinutes3" type="number" min="1" step="1" placeholder="Default">
-          <input id="classSectionId3" type="text" inputmode="numeric" placeholder="Section ID">
-          <select id="classCategoryName3">
-            <option value="">Schoology default</option>
-          </select>
-          <select id="classPeriodName3">
-            <option value="">Schoology default</option>
-          </select>
-          <input id="classGradingTaskId3" type="text" inputmode="numeric" placeholder="Optional">
-          <input id="classAssignmentId3" type="hidden">
-        </div>
-      </section>
-
-      <section class="summary-grid">
+      <section class="summary-grid" aria-label="Latest Khan capture summary">
         <article>
-          <span>Student</span>
+          <span>Students</span>
           <strong id="studentName">Not captured</strong>
         </article>
         <article>
-          <span>Exercises</span>
+          <span>Exercise minutes</span>
           <strong id="exerciseMinutes">Not captured</strong>
         </article>
         <article>
@@ -124,117 +77,150 @@
           <strong id="timeOnTaskMinutes">Not captured</strong>
         </article>
         <article>
-          <span>Khan date range</span>
+          <span>Date range</span>
           <strong id="dateRange">Not captured</strong>
         </article>
-        <article>
-          <span>Best frame</span>
-          <strong id="bestFrame">Not captured</strong>
-        </article>
       </section>
 
-      <section class="panel">
+      <section class="panel results-panel">
         <div class="section-header">
-          <h2>Khan API Results</h2>
+          <h2>Captured Students</h2>
           <button id="downloadButton" class="secondary" type="button" disabled>Download CSV</button>
         </div>
-        <div id="studentSummaryTable" class="table empty">No student report captured yet.</div>
+        <div id="studentSummaryTable" class="table empty">No Khan minutes captured yet.</div>
       </section>
 
-      <section class="panel">
+      <section class="panel results-panel">
         <div class="section-header">
-          <h2>Grading & Schoology</h2>
-          <div class="button-row">
-            <button id="saveSchoologyButton" class="secondary" type="button">Save Settings</button>
-            <button id="previewSchoologyTestButton" class="secondary" type="button">Preview Test Grades</button>
-          </div>
+          <h2>Assignments &amp; Grades</h2>
         </div>
-        <div class="schoology-grid">
-          <label>
-            Grade from
-            <select id="gradeMetric">
-              <option value="timeOnTaskMinutes">Time on task</option>
-              <option value="exerciseMinutes">Exercises</option>
-            </select>
-          </label>
-          <label>
-            Default required minutes
-            <input id="gradeTargetMinutes" type="number" min="1" step="1" value="50">
-          </label>
-          <label>
-            Max points
-            <input id="gradeMaxPoints" type="number" min="1" step="1" value="100">
-          </label>
-          <label>
-            Test minutes
-            <input id="schoologyTestMinutes" type="number" min="0" step="1" value="50">
-          </label>
-          <label>
-            Assignment title
-            <input id="assignmentTitleTemplate" type="text" value="Khan Minutes - Week of {startDate}">
-          </label>
-          <label>
-            Due date
-            <input id="assignmentDueDate" type="date">
-          </label>
-          <label>
-            Due time
-            <input id="assignmentDueTime" type="time" value="23:59">
-          </label>
-          <label>
-            API base
-            <input id="schoologyApiBase" type="url" value="https://api.schoology.com/v1">
-          </label>
-          <label>
-            Consumer key
-            <input id="schoologyConsumerKey" type="text" autocomplete="off">
-          </label>
-          <label>
-            Consumer secret
-            <input id="schoologyConsumerSecret" type="password" autocomplete="off">
-          </label>
-        </div>
-        <details class="advanced-options">
-          <summary>Advanced Schoology IDs</summary>
-          <p class="muted">Assignment IDs are saved internally after creation.</p>
-          <input id="assignmentCategoryId" type="hidden">
-          <input id="assignmentPeriodId" type="hidden">
-          <input id="assignmentGradingTaskId" type="hidden">
-        </details>
-        <div id="assignmentTable" class="table empty">No Schoology assignment preparation yet.</div>
-        <div id="schoologyPreviewTable" class="table empty">No Schoology grade preview yet.</div>
+        <div id="assignmentTable" class="table empty">No Schoology assignments prepared yet.</div>
+        <div id="schoologyPreviewTable" class="table empty">No grade preview yet.</div>
       </section>
+
+      <details class="panel setup-panel">
+        <summary>
+          <span class="summary-title">Setup</span>
+          <span class="summary-hint">Classes, grading, and Schoology connection</span>
+        </summary>
+        <div class="setup-content">
+          <section class="setup-section">
+            <div class="section-header">
+              <h2>Classes</h2>
+              <div class="button-row">
+                <button id="loadSchoologyOptionsButton" class="secondary" type="button">Refresh Categories &amp; Periods</button>
+                <button id="saveClassesButton" type="button">Save Classes</button>
+              </div>
+            </div>
+
+            <div class="class-list">
+              <section class="class-row" aria-labelledby="classLabel1">
+                <h3 id="classLabel1">Class 1</h3>
+                <div class="class-fields">
+                  <label>Class name<input id="className1" type="text" placeholder="Example: Algebra 1"></label>
+                  <label>Goal minutes<input id="classTargetMinutes1" type="number" min="1" step="1" placeholder="Default"></label>
+                  <label class="wide-field">Khan roster URL<input id="classUrl1" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster"></label>
+                  <label>Schoology section ID<input id="classSectionId1" type="text" inputmode="numeric" placeholder="Section ID"></label>
+                  <label>Grading category<select id="classCategoryName1"><option value="">Schoology default</option></select></label>
+                  <label>Grading period<select id="classPeriodName1"><option value="">Schoology default</option></select></label>
+                  <label>Task ID<input id="classGradingTaskId1" type="text" inputmode="numeric" placeholder="Optional"></label>
+                  <input id="classAssignmentId1" type="hidden">
+                </div>
+              </section>
+
+              <section class="class-row" aria-labelledby="classLabel2">
+                <h3 id="classLabel2">Class 2</h3>
+                <div class="class-fields">
+                  <label>Class name<input id="className2" type="text" placeholder="Example: Geometry"></label>
+                  <label>Goal minutes<input id="classTargetMinutes2" type="number" min="1" step="1" placeholder="Default"></label>
+                  <label class="wide-field">Khan roster URL<input id="classUrl2" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster"></label>
+                  <label>Schoology section ID<input id="classSectionId2" type="text" inputmode="numeric" placeholder="Section ID"></label>
+                  <label>Grading category<select id="classCategoryName2"><option value="">Schoology default</option></select></label>
+                  <label>Grading period<select id="classPeriodName2"><option value="">Schoology default</option></select></label>
+                  <label>Task ID<input id="classGradingTaskId2" type="text" inputmode="numeric" placeholder="Optional"></label>
+                  <input id="classAssignmentId2" type="hidden">
+                </div>
+              </section>
+
+              <section class="class-row" aria-labelledby="classLabel3">
+                <h3 id="classLabel3">Class 3</h3>
+                <div class="class-fields">
+                  <label>Class name<input id="className3" type="text" placeholder="Example: Math 8"></label>
+                  <label>Goal minutes<input id="classTargetMinutes3" type="number" min="1" step="1" placeholder="Default"></label>
+                  <label class="wide-field">Khan roster URL<input id="classUrl3" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster"></label>
+                  <label>Schoology section ID<input id="classSectionId3" type="text" inputmode="numeric" placeholder="Section ID"></label>
+                  <label>Grading category<select id="classCategoryName3"><option value="">Schoology default</option></select></label>
+                  <label>Grading period<select id="classPeriodName3"><option value="">Schoology default</option></select></label>
+                  <label>Task ID<input id="classGradingTaskId3" type="text" inputmode="numeric" placeholder="Optional"></label>
+                  <input id="classAssignmentId3" type="hidden">
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section class="setup-section">
+            <div class="section-header">
+              <h2>Assignment &amp; Grading</h2>
+              <button id="saveSchoologyButton" type="button">Save Schoology Settings</button>
+            </div>
+            <div class="settings-grid">
+              <label>Grade from<select id="gradeMetric"><option value="timeOnTaskMinutes">Time on task</option><option value="exerciseMinutes">Exercises</option></select></label>
+              <label>Default goal minutes<input id="gradeTargetMinutes" type="number" min="1" step="1" value="50"></label>
+              <label>Max points<input id="gradeMaxPoints" type="number" min="1" step="1" value="100"></label>
+              <label class="wide-field">Assignment title<input id="assignmentTitleTemplate" type="text" value="Khan Minutes - Week of {startDate}"></label>
+              <label>Due date<input id="assignmentDueDate" type="date"></label>
+              <label>Due time<input id="assignmentDueTime" type="time" value="23:59"></label>
+            </div>
+          </section>
+
+          <section class="setup-section">
+            <div class="section-header">
+              <h2>Schoology Connection</h2>
+            </div>
+            <div class="connection-grid">
+              <label>API base<input id="schoologyApiBase" type="url" value="https://api.schoology.com/v1"></label>
+              <label>Consumer key<input id="schoologyConsumerKey" type="text" autocomplete="off"></label>
+              <label>Consumer secret<input id="schoologyConsumerSecret" type="password" autocomplete="off"></label>
+            </div>
+            <div class="test-row">
+              <label>Test minutes<input id="schoologyTestMinutes" type="number" min="0" step="1" value="50"></label>
+              <button id="previewSchoologyTestButton" class="secondary" type="button">Preview Test Grades</button>
+            </div>
+            <details class="advanced-options compact">
+              <summary>Advanced Schoology IDs</summary>
+              <p class="muted">Assignment IDs are saved internally after creation.</p>
+              <input id="assignmentCategoryId" type="hidden">
+              <input id="assignmentPeriodId" type="hidden">
+              <input id="assignmentGradingTaskId" type="hidden">
+            </details>
+          </section>
+        </div>
+      </details>
 
       <details class="panel diagnostics-panel">
-        <summary>Diagnostics and raw data</summary>
+        <summary>
+          <span class="summary-title">Diagnostics</span>
+          <span class="summary-hint">Troubleshooting details and raw data</span>
+        </summary>
         <div class="diagnostics-stack">
           <section>
-            <div class="section-header">
-              <h2>Activity Details</h2>
-            </div>
+            <div class="section-header"><h2>Khan source</h2></div>
+            <p id="bestFrame" class="source-meta">Not captured</p>
+          </section>
+          <section>
+            <div class="section-header"><h2>Activity Details</h2></div>
             <div id="activityTable" class="table empty">No activity details captured yet.</div>
           </section>
-
           <section>
-            <div class="section-header">
-              <h2>Fallback Total Rows</h2>
-            </div>
+            <div class="section-header"><h2>Fallback Total Rows</h2></div>
             <div id="table" class="table empty">No fallback total rows captured yet.</div>
           </section>
-
           <section>
-            <div class="section-header">
-              <h2>Diagnostics</h2>
-              <button id="copyDiagnosticsButton" class="secondary" type="button" disabled>Copy Diagnostics</button>
-            </div>
+            <div class="section-header"><h2>Capture Diagnostics</h2><button id="copyDiagnosticsButton" class="secondary" type="button" disabled>Copy Diagnostics</button></div>
             <pre id="diagnostics">No diagnostics yet.</pre>
           </section>
-
           <section>
-            <div class="section-header">
-              <h2>Network Probe</h2>
-              <button id="copyNetworkProbeButton" class="secondary" type="button" disabled>Copy Network Probe</button>
-            </div>
+            <div class="section-header"><h2>Network Probe</h2><button id="copyNetworkProbeButton" class="secondary" type="button" disabled>Copy Network Probe</button></div>
             <pre id="networkProbe">No network probe collected yet.</pre>
           </section>
         </div>

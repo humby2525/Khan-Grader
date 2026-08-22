@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.14.1";
+const BUILD_VERSION = "0.15.0";
 const DEFAULT_ASSIGNMENT_TITLE_TEMPLATE = "Khan Minutes - Week of {startDate}";
 const LEGACY_ASSIGNMENT_TITLE_TEMPLATE = "Khan Active Minutes - Week of {startDate}";
 const STORAGE_KEY = "khanGrader.lastCapture";
@@ -840,7 +840,7 @@ async function captureConfiguredClass(config, startDate, endDate) {
       rosterResult = await waitForRosterStudents(tab.id, config.name, 12000);
     }
     if (rosterResult.students.length <= 1) {
-      const error = new Error(`${config.name}: only found ${rosterResult.students.length} student(s) on the roster page after waiting. Open that roster page once in Chrome, confirm students are visible, then try Capture All Classes again.`);
+      const error = new Error(`${config.name}: only found ${rosterResult.students.length} student(s) on the roster page after waiting. Open that roster page once in Chrome, confirm students are visible, then try Capture Minutes again.`);
       error.classConfig = config;
       error.rosterResult = rosterResult;
       throw error;
