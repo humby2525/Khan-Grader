@@ -11,9 +11,9 @@
       <header class="topbar">
         <div>
           <h1>Khan Grader</h1>
-          <p>Capture learning minutes from the current Khan Academy Activity Report.</p>
+          <p>Capture Khan Academy class totals or student activity details.</p>
         </div>
-        <span id="build">v0.1.0</span>
+        <span id="build">v0.2.0</span>
       </header>
 
       <section class="panel controls">
@@ -33,8 +33,12 @@
 
       <section class="summary-grid">
         <article>
-          <span>Rows</span>
+          <span>Total rows</span>
           <strong id="rowCount">0</strong>
+        </article>
+        <article>
+          <span>Activity rows</span>
+          <strong id="activityRowCount">0</strong>
         </article>
         <article>
           <span>Khan date range</span>
@@ -48,10 +52,17 @@
 
       <section class="panel">
         <div class="section-header">
-          <h2>Captured Students</h2>
+          <h2>Captured Totals</h2>
           <button id="downloadButton" class="secondary" type="button" disabled>Download CSV</button>
         </div>
         <div id="table" class="table empty">No rows captured yet.</div>
+      </section>
+
+      <section class="panel">
+        <div class="section-header">
+          <h2>Captured Activity Details</h2>
+        </div>
+        <div id="activityTable" class="table empty">No activity details captured yet.</div>
       </section>
 
       <section class="panel">

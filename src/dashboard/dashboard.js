@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.1.0";
+const BUILD_VERSION = "0.2.0";
 const STORAGE_KEY = "khanGrader.lastCapture";
 
 const elements = {};
@@ -58,10 +58,10 @@ async function captureCurrentTab() {
     await chrome.storage.local.set({ [STORAGE_KEY]: lastCapture });
     renderCapture(lastCapture);
 
-    if (lastCapture.rows.length) {
-      setStatus(`Captured ${lastCapture.rows.length} student row(s). Khan showed date range: ${lastCapture.dateRange || "not detected"}.`);
+    if (lastCapture.rows.length || lastCapture.activityRows.length) {
+      setStatus(`Captured ${lastCapture.rows.length} total row(s) and ${lastCapture.activityRows.length} activity row(s). Khan page type: ${lastCapture.pageKind}.`);
     } else {
-      setError("Khan was readable, but no student rows were found. Check Diagnostics and make sure the Activity table is visible.");
+      setError("Khan was readable, but no total rows or activity rows were found. Check Diagnostics and make sure the activity information is visible.");
     }
   } catch (error) {
     setError(error.message || String(error));
@@ -106,20 +106,24 @@ async function readKhanTab(tab) {
 
   const bestReport = frameReports
     .slice()
-    .sort((a, b) => (b.rows?.length || 0) - (a.rows?.length || 0))[0];
+    .sort((a, b) => ((b.activityRows?.length || 0) + (b.rows?.length || 0)) - ((a.activityRows?.length || 0) + (a.rows?.length || 0)))[0];
 
   return {
     pageUrl: tab.url,
     pageTitle: tab.title,
     bestFrameUrl: bestReport.url,
     bestFrameTitle: bestReport.title,
+    pageKind: bestReport.pageKind || "unknown",
     dateRange: bestReport.dateRange || "",
     rows: dedupeRows(frameReports.flatMap((report) => report.rows || [])),
+    activityRows: dedupeActivityRows(frameReports.flatMap((report) => report.activityRows || [])),
     frameReports: frameReports.map((report) => ({
       frameIndex: report.frameIndex,
       url: report.url,
       title: report.title,
       rowCount: report.rows?.length || 0,
+      activityRowCount: report.activityRows?.length || 0,
+      pageKind: report.pageKind || "unknown",
       dateRange: report.dateRange || "",
       diagnostics: report.diagnostics,
       textSample: report.textSample
@@ -129,13 +133,15 @@ async function readKhanTab(tab) {
 
 function renderCapture(capture) {
   elements.rowCount.textContent = String(capture.rows.length);
+  elements.activityRowCount.textContent = String(capture.activityRows?.length || 0);
   elements.dateRange.textContent = capture.dateRange || "Not detected";
   elements.bestFrame.textContent = capture.bestFrameUrl || "Not detected";
 
-  elements.downloadButton.disabled = capture.rows.length === 0;
+  elements.downloadButton.disabled = capture.rows.length === 0 && (capture.activityRows?.length || 0) === 0;
   elements.copyDiagnosticsButton.disabled = false;
 
   renderTable(capture.rows);
+  renderActivityTable(capture.activityRows || []);
   elements.diagnostics.textContent = formatDiagnostics(capture);
 }
 
@@ -165,6 +171,33 @@ function renderTable(rows) {
   }
 }
 
+function renderActivityTable(rows) {
+  elements.activityTable.className = rows.length ? "table" : "table empty";
+  elements.activityTable.innerHTML = "";
+
+  if (!rows.length) {
+    elements.activityTable.textContent = "No activity details captured.";
+    return;
+  }
+
+  const header = document.createElement("div");
+  header.className = "row activity header";
+  header.innerHTML = "<div>Date</div><div>Activity</div><div>Minutes</div><div>Source</div>";
+  elements.activityTable.append(header);
+
+  for (const row of rows) {
+    const line = document.createElement("div");
+    line.className = "row activity";
+    line.innerHTML = `
+      <div>${escapeHtml(row.dateText)}</div>
+      <div>${escapeHtml(row.activity)}</div>
+      <div>${escapeHtml(row.minutes)}</div>
+      <div class="source">${escapeHtml(row.sourceText || "")}</div>
+    `;
+    elements.activityTable.append(line);
+  }
+}
+
 function formatDiagnostics(capture) {
   return JSON.stringify({
     build: BUILD_VERSION,
@@ -175,8 +208,11 @@ function formatDiagnostics(capture) {
     pageTitle: capture.pageTitle,
     bestFrameUrl: capture.bestFrameUrl,
     bestFrameTitle: capture.bestFrameTitle,
+    pageKind: capture.pageKind,
     detectedDateRange: capture.dateRange,
     rowCount: capture.rows.length,
+    activityRowCount: capture.activityRows?.length || 0,
+    activityRows: capture.activityRows || [],
     framesChecked: capture.frameReports.length,
     frameReports: capture.frameReports
   }, null, 2);
@@ -191,17 +227,31 @@ async function copyDiagnostics() {
 function downloadCsv() {
   if (!lastCapture) return;
 
-  const csv = [
-    "Expected Week Start,Expected Week End,Khan Date Range,Student,Minutes,Source",
-    ...lastCapture.rows.map((row) => [
+  const activityRows = lastCapture.activityRows || [];
+  const csv = activityRows.length
+    ? [
+      "Expected Week Start,Expected Week End,Khan Date Range,Date,Activity,Minutes,Source",
+      ...activityRows.map((row) => [
+        lastCapture.expectedWeekStart,
+        lastCapture.expectedWeekEnd,
+        lastCapture.dateRange,
+        row.dateText,
+        row.activity,
+        row.minutes,
+        row.sourceText || ""
+      ].map(csvCell).join(","))
+    ].join("\n")
+    : [
+      "Expected Week Start,Expected Week End,Khan Date Range,Student,Minutes,Source",
+      ...lastCapture.rows.map((row) => [
       lastCapture.expectedWeekStart,
       lastCapture.expectedWeekEnd,
       lastCapture.dateRange,
       row.name,
       row.minutes,
       row.sourceText || ""
-    ].map(csvCell).join(","))
-  ].join("\n");
+      ].map(csvCell).join(","))
+    ].join("\n");
 
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
@@ -210,6 +260,20 @@ function downloadCsv() {
   link.download = `khan-minutes-${lastCapture.expectedWeekStart || "capture"}.csv`;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function dedupeActivityRows(rows) {
+  const byKey = new Map();
+  for (const row of rows) {
+    const key = [
+      String(row.dateText || "").toLowerCase().trim(),
+      normalizeName(row.activity),
+      row.minutes
+    ].join("|");
+    const current = byKey.get(key);
+    if (!current || row.sourceText.length < current.sourceText.length) byKey.set(key, row);
+  }
+  return Array.from(byKey.values()).sort((a, b) => (a.dateText || "").localeCompare(b.dateText || "") || a.activity.localeCompare(b.activity));
 }
 
 function dedupeRows(rows) {

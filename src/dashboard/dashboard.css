@@ -129,7 +129,7 @@ input {
 .summary-grid {
   display: grid;
   gap: 14px;
-  grid-template-columns: 120px 1fr 1fr;
+  grid-template-columns: 120px 150px 1fr 1fr;
   margin-top: 18px;
 }
 
@@ -178,6 +178,10 @@ input {
   gap: 12px;
   grid-template-columns: minmax(220px, 1fr) 100px minmax(280px, 1.4fr);
   padding: 10px 12px;
+}
+
+.row.activity {
+  grid-template-columns: 120px minmax(220px, 1fr) 100px minmax(280px, 1.2fr);
 }
 
 .row:nth-child(even) {

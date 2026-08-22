@@ -16,11 +16,14 @@ function getKhanReport() {
   const pageText = getVisiblePageText();
   const selectedText = String(window.getSelection?.() || "");
   const rows = extractKhanRows(pageText);
+  const activityRows = extractActivityRows(pageText);
 
   return {
     url: location.href,
     title: document.title,
     rows,
+    activityRows,
+    pageKind: inferPageKind(pageText, rows, activityRows),
     dateRange: extractDateRange(pageText),
     textSample: pageText.slice(0, 6000),
     selectedTextSample: selectedText.slice(0, 2000),
@@ -34,6 +37,17 @@ function getKhanReport() {
       shadowRootCount: countShadowRoots()
     }
   };
+}
+
+function inferPageKind(pageText, rows, activityRows) {
+  const text = String(pageText || "").toLowerCase();
+  if (activityRows.length && /activity|minutes|course|skill|assignment|mastery|practice/.test(text)) {
+    return "student-activity";
+  }
+  if (rows.length && /student|total|date range|time on task/.test(text)) {
+    return "class-activity";
+  }
+  return "unknown";
 }
 
 function extractDateRange(pageText) {
@@ -64,6 +78,116 @@ function extractKhanRows(pageText) {
   return dedupeRows([...selectedRows, ...tableRows, ...roleRows, ...pageTextRows])
     .filter((row) => looksLikeStudent(row.name))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function extractActivityRows(pageText) {
+  const tableRows = Array.from(document.querySelectorAll("tr"))
+    .map(extractActivityFromElement)
+    .filter(Boolean);
+
+  const roleRows = Array.from(document.querySelectorAll('[role="row"], li'))
+    .map(extractActivityFromElement)
+    .filter(Boolean);
+
+  const selectedRows = extractActivityFromVisibleText(String(window.getSelection?.() || ""));
+  const pageTextRows = extractActivityFromVisibleText(pageText);
+
+  return dedupeActivityRows([...selectedRows, ...tableRows, ...roleRows, ...pageTextRows])
+    .sort((a, b) => (a.dateText || "").localeCompare(b.dateText || "") || a.activity.localeCompare(b.activity));
+}
+
+function extractActivityFromElement(element) {
+  if (!isVisible(element)) return null;
+  const text = compactText(element.innerText);
+  if (!text || text.length > 500) return null;
+  return extractActivityFromLooseText(text);
+}
+
+function extractActivityFromVisibleText(text) {
+  const lines = getLines(text);
+  const rows = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const sameLine = extractActivityFromLooseText(lines[index]);
+    if (sameLine) rows.push(sameLine);
+
+    const date = parseDateText(lines[index]);
+    if (!date) continue;
+
+    for (let end = index + 1; end <= index + 5 && end < lines.length; end += 1) {
+      const sourceText = lines.slice(index, end + 1).join(" | ");
+      const candidate = extractActivityFromLooseText(sourceText);
+      if (candidate) {
+        rows.push(candidate);
+        break;
+      }
+    }
+  }
+
+  return rows;
+}
+
+function extractActivityFromLooseText(text) {
+  const minutes = parseMinutes(text);
+  if (minutes === null) return null;
+
+  const dateText = parseDateText(text);
+  if (!dateText) return null;
+
+  const activity = inferActivityName(text, dateText);
+  if (!activity || isActivityLabel(activity)) return null;
+
+  return {
+    dateText,
+    activity,
+    minutes,
+    sourceText: compactText(text)
+  };
+}
+
+function parseDateText(text) {
+  const value = compactText(text);
+  const numericDate = value.match(/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/);
+  if (numericDate) return numericDate[0];
+
+  const namedDate = value.match(/\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:,\s*\d{4})?\b/i);
+  if (namedDate) return namedDate[0];
+
+  const relativeDate = value.match(/\b(?:today|yesterday)\b/i);
+  if (relativeDate) return relativeDate[0];
+
+  return "";
+}
+
+function inferActivityName(text, dateText) {
+  return compactText(text)
+    .replace(dateText, " ")
+    .replace(/\b\d+(?:\.\d+)?\s*(?:learning\s*)?(?:minutes?|mins?|m)\b/gi, " ")
+    .replace(/\b\d+\s*(?:hours?|hrs?|h)\s*(?:\d+\s*(?:minutes?|mins?|m))?\b/gi, " ")
+    .replace(/\b(completed|started|worked on|practiced|mastered|leveled up|minutes|learning minutes|active minutes)\b/gi, " ")
+    .replace(/\s*\|\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isActivityLabel(text) {
+  return /\b(date|activity|minutes|total|student|report|filter|sort|time on task|course|skill)\b/i.test(String(text || ""));
+}
+
+function dedupeActivityRows(rows) {
+  const byKey = new Map();
+  for (const row of rows) {
+    const key = [
+      compactText(row.dateText).toLowerCase(),
+      normalizeName(row.activity),
+      row.minutes
+    ].join("|");
+    const current = byKey.get(key);
+    if (!current || row.sourceText.length < current.sourceText.length) {
+      byKey.set(key, row);
+    }
+  }
+  return Array.from(byKey.values());
 }
 
 function extractFromTableRow(row) {
