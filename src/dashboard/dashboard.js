@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.15.0";
+const BUILD_VERSION = "0.15.1";
 const DEFAULT_ASSIGNMENT_TITLE_TEMPLATE = "Khan Minutes - Week of {startDate}";
 const LEGACY_ASSIGNMENT_TITLE_TEMPLATE = "Khan Active Minutes - Week of {startDate}";
 const STORAGE_KEY = "khanGrader.lastCapture";
@@ -1464,30 +1464,75 @@ async function findOrCreateSchoologyAssignments(classConfigs, schoologyConfig, s
   for (const classConfig of classConfigs) {
     try {
       const expectedAssignmentFields = await resolveSchoologyAssignmentFields(classConfig, schoologyConfig);
-      const assignments = await fetchSchoologyAssignments(classConfig.schoologySectionId, schoologyConfig);
-      const exactMatches = assignments.filter((assignment) => compactText(assignment.title) === title && assignment?.id);
+      const assignmentSearch = await fetchSchoologyAssignments(classConfig.schoologySectionId, schoologyConfig);
+      const titleKey = normalizeSchoologyAssignmentTitle(title);
+      const exactMatches = assignmentSearch.assignments
+        .filter((assignment) => normalizeSchoologyAssignmentTitle(assignment?.title) === titleKey && schoologyAssignmentId(assignment));
+      const candidateIds = new Set(exactMatches.map((assignment) => schoologyAssignmentId(assignment)));
+      const savedAssignmentId = compactText(classConfig.schoologyAssignmentId);
+      let savedIdStatus = savedAssignmentId ? "not_checked" : "none";
+
+      if (savedAssignmentId && !candidateIds.has(savedAssignmentId)) {
+        try {
+          const savedAssignment = await fetchSchoologyAssignment(classConfig.schoologySectionId, savedAssignmentId, schoologyConfig);
+          if (normalizeSchoologyAssignmentTitle(savedAssignment?.title) === titleKey) {
+            exactMatches.unshift(savedAssignment);
+            candidateIds.add(savedAssignmentId);
+            savedIdStatus = "matched_title";
+          } else {
+            savedIdStatus = "different_title";
+          }
+        } catch (error) {
+          if (isSchoologyNotFoundError(error)) savedIdStatus = "not_found";
+          else throw error;
+        }
+      } else if (savedAssignmentId) {
+        savedIdStatus = "listed_match";
+      }
+
       let reusableAssignment = null;
+      const rejectedMatches = [];
 
       for (const existing of exactMatches) {
-        const verified = await fetchSchoologyAssignment(classConfig.schoologySectionId, existing.id, schoologyConfig);
+        const existingId = schoologyAssignmentId(existing);
+        let verified;
+        try {
+          verified = await fetchSchoologyAssignment(classConfig.schoologySectionId, existingId, schoologyConfig);
+        } catch (error) {
+          if (isSchoologyNotFoundError(error)) {
+            rejectedMatches.push({
+              assignmentId: existingId,
+              reason: "Assignment appeared in the list but no longer exists."
+            });
+            continue;
+          }
+          throw error;
+        }
         const summary = summarizeSchoologyAssignment(verified);
-        if (isReusableSchoologyAssignment(summary, expectedAssignmentFields)) {
+        const reuseIssue = getSchoologyAssignmentReuseIssue(summary, expectedAssignmentFields);
+        if (!reuseIssue) {
           reusableAssignment = {
-            id: String(existing.id),
+            id: existingId,
             summary
           };
           break;
         }
-        rows.push({
-          className: classConfig.name || "",
-          sectionId: classConfig.schoologySectionId,
-          assignmentId: String(existing.id),
-          title,
-          status: "skipped",
-          skipReason: "Schoology returned this title, but it is not currently usable or does not match the selected assignment settings.",
+        rejectedMatches.push({
+          assignmentId: existingId,
+          reason: reuseIssue,
           ...summary
         });
       }
+
+      const search = {
+        assignmentsChecked: assignmentSearch.assignments.length,
+        pagesChecked: assignmentSearch.pagesChecked,
+        reportedTotal: assignmentSearch.reportedTotal,
+        titleMatches: exactMatches.length,
+        savedAssignmentId,
+        savedIdStatus,
+        rejectedMatches
+      };
 
       if (reusableAssignment) {
         rows.push({
@@ -1496,6 +1541,7 @@ async function findOrCreateSchoologyAssignments(classConfigs, schoologyConfig, s
           assignmentId: reusableAssignment.id,
           title,
           status: "found",
+          search,
           ...reusableAssignment.summary
         });
         continue;
@@ -1510,6 +1556,7 @@ async function findOrCreateSchoologyAssignments(classConfigs, schoologyConfig, s
         assignmentId: createdId,
         title,
         status: "created",
+        search,
         ...summarizeSchoologyAssignment(verified)
       });
     } catch (error) {
@@ -1534,10 +1581,72 @@ async function findOrCreateSchoologyAssignments(classConfigs, schoologyConfig, s
 }
 
 async function fetchSchoologyAssignments(sectionId, schoologyConfig) {
-  const json = await schoologyFetchJson(`/sections/${encodeURIComponent(sectionId)}/assignments?limit=200`, {
-    method: "GET"
-  }, schoologyConfig);
-  return normalizeArray(json?.assignment);
+  const limit = 50;
+  const maxPages = 40;
+  const assignmentsById = new Map();
+  let pagesChecked = 0;
+  let reportedTotal = null;
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const start = page * limit;
+    const json = await schoologyFetchJson(`/sections/${encodeURIComponent(sectionId)}/assignments?start=${start}&limit=${limit}`, {
+      method: "GET"
+    }, schoologyConfig);
+    pagesChecked += 1;
+
+    const pageAssignments = normalizeSchoologyAssignmentCollection(json);
+    const sizeBefore = assignmentsById.size;
+    for (const assignment of pageAssignments) {
+      const assignmentId = schoologyAssignmentId(assignment);
+      if (assignmentId) assignmentsById.set(assignmentId, assignment);
+    }
+
+    const total = Number(json?.total ?? json?.assignments?.total);
+    if (Number.isFinite(total) && total >= 0) reportedTotal = total;
+    if (!pageAssignments.length) break;
+    if (reportedTotal !== null && assignmentsById.size >= reportedTotal) break;
+    if (assignmentsById.size === sizeBefore) break;
+  }
+
+  return {
+    assignments: Array.from(assignmentsById.values()),
+    pagesChecked,
+    reportedTotal
+  };
+}
+
+function normalizeSchoologyAssignmentCollection(json) {
+  if (Array.isArray(json)) return json;
+  const candidates = [
+    json?.assignment,
+    json?.assignments,
+    json?.assignments?.assignment,
+    json?.data?.assignment,
+    json?.data?.assignments
+  ];
+  for (const candidate of candidates) {
+    const rows = normalizeArray(candidate);
+    if (rows.length && rows.some((row) => row && typeof row === "object" && (row.title || schoologyAssignmentId(row)))) {
+      return rows;
+    }
+  }
+  return [];
+}
+
+function schoologyAssignmentId(assignment) {
+  return compactText(assignment?.id ?? assignment?.grade_item_id ?? "");
+}
+
+function normalizeSchoologyAssignmentTitle(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase();
+}
+
+function isSchoologyNotFoundError(error) {
+  return /Schoology API 404\b/i.test(error?.message || String(error));
 }
 
 async function fetchSchoologyAssignment(sectionId, assignmentId, schoologyConfig) {
@@ -1684,13 +1793,17 @@ function summarizeSchoologyAssignment(assignment) {
   };
 }
 
-function isReusableSchoologyAssignment(summary, expectedAssignmentFields = {}) {
-  return isTruthySchoologyFlag(summary.published)
-    && isTruthySchoologyFlag(summary.countInGrade)
-    && !isFalsySchoologyFlag(summary.available)
-    && schoologyOptionalFieldMatches(summary.gradingCategory, expectedAssignmentFields.categoryId)
-    && schoologyOptionalFieldMatches(summary.gradingPeriod, expectedAssignmentFields.periodId)
-    && schoologyOptionalFieldMatches(summary.gradingTask, expectedAssignmentFields.gradingTaskId);
+function getSchoologyAssignmentReuseIssue(summary, expectedAssignmentFields = {}) {
+  if (!isTruthySchoologyFlag(summary.published)) return "Assignment is not published.";
+  if (!isTruthySchoologyFlag(summary.countInGrade)) return "Assignment is not included in the calculated grade.";
+  if (isFalsySchoologyFlag(summary.available)) return "Assignment is not available.";
+  if (!schoologyOptionalFieldMatches(summary.gradingCategory, expectedAssignmentFields.categoryId)) return "Grading category does not match the class setup.";
+  if (!schoologyOptionalFieldMatches(summary.gradingPeriod, expectedAssignmentFields.periodId)) return "Grading period does not match the class setup.";
+
+  const expectedTask = compactText(expectedAssignmentFields.gradingTaskId);
+  const returnedTask = schoologyFieldId(summary.gradingTask);
+  if (expectedTask && returnedTask && returnedTask !== expectedTask) return "Grading task does not match the class setup.";
+  return "";
 }
 
 function isTruthySchoologyFlag(value) {
@@ -1705,10 +1818,13 @@ function applyAssignmentIdsToClassConfigs(classConfigs, rows) {
   const assignmentsBySection = new Map(rows
     .filter((row) => row.assignmentId)
     .map((row) => [String(row.sectionId), String(row.assignmentId)]));
+  const attemptedSections = new Set(rows.map((row) => String(row.sectionId)));
 
   return classConfigs.map((config) => ({
     ...config,
-    schoologyAssignmentId: assignmentsBySection.get(String(config.schoologySectionId)) || config.schoologyAssignmentId || ""
+    schoologyAssignmentId: attemptedSections.has(String(config.schoologySectionId))
+      ? assignmentsBySection.get(String(config.schoologySectionId)) || ""
+      : config.schoologyAssignmentId || ""
   }));
 }
 
@@ -2315,7 +2431,7 @@ function renderAssignmentResults(result) {
       <div>${escapeHtml(row.verifiedTitle || row.title || "")}<div class="source">${escapeHtml(formatAssignmentDetails(row))}</div></div>
       <div>${escapeHtml(row.assignmentId || "")}</div>
       <div>${escapeHtml(formatAssignmentVisibility(row))}</div>
-      <div>${escapeHtml(formatAssignmentStatus(row.status))}${row.skipReason ? `<div class="source">${escapeHtml(row.skipReason)}</div>` : ""}${row.selfLink ? `<div class="source">${escapeHtml(row.selfLink)}</div>` : ""}${row.error ? `<div class="source">${escapeHtml(row.error)}</div>` : ""}</div>
+      <div>${escapeHtml(formatAssignmentStatus(row.status))}${row.search ? `<div class="source">${escapeHtml(formatAssignmentSearch(row.search))}</div>` : ""}${row.selfLink ? `<div class="source">${escapeHtml(row.selfLink)}</div>` : ""}${row.error ? `<div class="source">${escapeHtml(row.error)}</div>` : ""}</div>
     `;
     elements.assignmentTable.append(line);
   }
@@ -2328,6 +2444,16 @@ function formatAssignmentDetails(row) {
     row.gradingPeriod !== "" && row.gradingPeriod !== undefined ? `Period ${row.gradingPeriod}` : "",
     row.gradingTask !== "" && row.gradingTask !== undefined ? `Task ${row.gradingTask}` : ""
   ].filter(Boolean).join(" / ");
+}
+
+function formatAssignmentSearch(search) {
+  const checked = Number(search?.assignmentsChecked || 0);
+  const pages = Number(search?.pagesChecked || 0);
+  const matches = Number(search?.titleMatches || 0);
+  const rejected = search?.rejectedMatches || [];
+  const details = `Checked ${checked} assignment${checked === 1 ? "" : "s"} on ${pages} page${pages === 1 ? "" : "s"}; ${matches} title match${matches === 1 ? "" : "es"}.`;
+  if (!rejected.length) return details;
+  return `${details} Rejected match: ${rejected.map((match) => match.reason).join(" ")}`;
 }
 
 function formatAssignmentVisibility(row) {

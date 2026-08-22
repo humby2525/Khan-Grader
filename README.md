@@ -102,13 +102,13 @@ For each weekly assignment:
 3. Enter a due date and due time. If due date is blank, the extension uses the selected week end date.
 4. Click **Create Assignments**.
 
-The extension checks each section for an existing assignment with the exact same title. If it finds one, it reuses that assignment ID only when it also matches the selected assignment settings. If it does not find one, it creates a published, count-in-grade assignment using the max points, due date, due time, grading category, and grading period from the grading settings and saves the returned assignment ID internally. The assignment description tells students to spend the class goal minutes on Khan that week.
+The extension checks every page of each section's assignment list for an existing assignment with the same normalized title. It also verifies any internally saved assignment ID directly. If it finds a published, available, count-in-grade assignment whose documented category and period match the class setup, it reuses that assignment. If it does not find a reusable match, it creates the assignment and saves the returned ID internally. The assignment description tells students to spend the class goal minutes on Khan that week.
 
 Schoology category, period, and task IDs can differ by section even when the visible name is the same. For that reason, category, period, and optional task ID are saved with each class. The assignment ID is hidden because the extension manages it after **Create Assignments**.
 
-After finding or creating each assignment, the extension fetches it back from Schoology and shows the published, available, count-in-grade, due date, category, period, points, and API self link in the assignment results table. If Schoology still returns an old matching title that is not usable, the extension marks it as skipped and creates a new assignment. If the Schoology page does not show the assignment, copy the Network Probe output after running **Create Assignments**.
+After finding or creating each assignment, the extension fetches it back from Schoology and shows the published, available, count-in-grade, due date, category, period, points, and API self link in the assignment results table. If Schoology still lists a deleted or unusable matching assignment, the extension records why it was rejected and creates a new assignment. If the Schoology page does not show the assignment, copy the Network Probe output after running **Create Assignments**.
 
-Schoology's public assignment API documents `grading_category` and `grading_period` for assignment creation. It does not document a matching assignment field or option endpoint for the Schoology UI's grading task dropdown. The extension includes the optional per-class task ID in assignment creation, but your Schoology tenant may reject or ignore it.
+Schoology's public assignment API documents `grading_category` and `grading_period` for assignment creation. It does not document a matching assignment field or option endpoint for the Schoology UI's grading task dropdown. The extension includes the optional per-class task ID in assignment creation, but it does not reject an otherwise valid existing assignment when Schoology omits that undocumented field from the response.
 
 Supported title placeholders:
 
