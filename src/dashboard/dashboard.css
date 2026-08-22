@@ -128,7 +128,7 @@ select {
 .class-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(120px, 0.8fr) minmax(220px, 1.5fr) minmax(95px, 0.55fr) minmax(115px, 0.65fr) minmax(125px, 0.7fr) minmax(95px, 0.5fr);
+  grid-template-columns: minmax(105px, 0.65fr) minmax(190px, 1.2fr) minmax(90px, 0.45fr) minmax(105px, 0.55fr) minmax(135px, 0.7fr) minmax(135px, 0.7fr) minmax(85px, 0.45fr);
   margin-top: 10px;
 }
 
@@ -168,6 +168,11 @@ select {
   display: grid;
   gap: 18px;
   margin-top: 16px;
+}
+
+.muted {
+  color: #52616b;
+  font-size: 13px;
 }
 
 .class-grid.header {

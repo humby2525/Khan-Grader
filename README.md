@@ -91,15 +91,14 @@ Use **Find/Create Assignments** before the week starts if you want students to s
 2. Enter an assignment title template, such as `Khan Minutes - Week of {startDate}`.
 3. Enter a due date and due time. If due date is blank, the extension uses the selected week end date.
 4. Make sure each class has a Schoology section ID.
-5. Click **Load Grade Options** to fill the category and grading period dropdowns from the Schoology API.
-6. If the grading task dropdown is empty, open a Schoology assignment create or edit page in another tab and click **Read Schoology Page Dropdowns**. The extension reads the visible Schoology form dropdowns from that signed-in page.
-7. Choose the grading category, grading task, and grading period from the dropdowns.
-8. If Schoology task IDs differ by class, open an assignment create/edit page for each class and click **Read Schoology Page Dropdowns**. When the page URL includes the matching section ID, the extension saves that class's task ID in the Saved Classes row.
-9. Click **Find/Create Assignments**.
+5. Click **Load Grade Options** to fill each class row's grading category and grading period dropdowns from that class's Schoology section.
+6. Choose the grading category and grading period in each class row.
+7. If you need a task ID, open a Schoology assignment create or edit page for each class and click **Read Schoology Page Dropdowns**. When the page URL includes the matching section ID, the extension saves that class's task ID in the Saved Classes row.
+8. Click **Find/Create Assignments**.
 
-The extension checks each section for an existing assignment with the exact same title. If it finds one, it reuses that assignment ID only when it also matches the selected assignment settings. If it does not find one, it creates a published, count-in-grade assignment using the max points, due date, due time, grading category, and grading period from the grading settings and saves the returned assignment ID into the class row. The assignment description tells students to spend the class goal minutes on Khan that week.
+The extension checks each section for an existing assignment with the exact same title. If it finds one, it reuses that assignment ID only when it also matches the selected assignment settings. If it does not find one, it creates a published, count-in-grade assignment using the max points, due date, due time, grading category, and grading period from the grading settings and saves the returned assignment ID internally. The assignment description tells students to spend the class goal minutes on Khan that week.
 
-Schoology category, period, and task IDs can differ by section even when the visible name is the same. For that reason, the normal workflow is to choose the visible dropdown name. The extension looks it up separately in each section and sends the correct per-section ID. The fallback ID fields are only for one-section testing or unusual cases where you already know the ID is safe to reuse.
+Schoology category, period, and task IDs can differ by section even when the visible name is the same. For that reason, the normal workflow is to choose category and period in each class row. The assignment ID is hidden because the extension manages it after **Find/Create Assignments**.
 
 After finding or creating each assignment, the extension fetches it back from Schoology and shows the published, available, count-in-grade, due date, category, period, points, and API self link in the assignment results table. If Schoology still returns an old matching title that is not usable, the extension marks it as skipped and creates a new assignment. If the Schoology page does not show the assignment, copy the Network Probe output after running **Find/Create Assignments**.
 
@@ -118,12 +117,11 @@ Supported title placeholders:
 
 Use this when Schoology has the current roster but Khan does not yet.
 
-1. Create or choose a temporary test assignment in Schoology.
-2. Put that test assignment ID in each saved class row.
-3. Enter a fake value in **Test minutes**.
-4. Click **Preview Test Grades**.
-5. Confirm that the roster names, enrollment IDs, and calculated grades look right.
-6. Click **Send Grades to Schoology** only if the assignment ID is a test assignment.
+1. Use **Find/Create Assignments** to create a temporary test assignment.
+2. Enter a fake value in **Test minutes**.
+3. Click **Preview Test Grades**.
+4. Confirm that the roster names, enrollment IDs, and calculated grades look right.
+5. Click **Send Grades to Schoology** only if the created assignment is a test assignment.
 
 This test mode does not use Khan data. It pulls active member enrollments from Schoology, calculates grades from the fake test minutes value, and writes comments beginning with `TEST Khan Grader`.
 

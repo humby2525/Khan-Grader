@@ -61,7 +61,8 @@
           <div>Khan roster URL</div>
           <div>Goal minutes</div>
           <div>Schoology section ID</div>
-          <div>Schoology assignment ID</div>
+          <div>Grading category</div>
+          <div>Grading period</div>
           <div>Task ID</div>
         </div>
         <div class="class-grid">
@@ -69,24 +70,42 @@
           <input id="classUrl1" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster">
           <input id="classTargetMinutes1" type="number" min="1" step="1" placeholder="Default">
           <input id="classSectionId1" type="text" inputmode="numeric" placeholder="Section ID">
-          <input id="classAssignmentId1" type="text" inputmode="numeric" placeholder="Assignment ID">
+          <select id="classCategoryName1">
+            <option value="">Schoology default</option>
+          </select>
+          <select id="classPeriodName1">
+            <option value="">Schoology default</option>
+          </select>
           <input id="classGradingTaskId1" type="text" inputmode="numeric" placeholder="Optional">
+          <input id="classAssignmentId1" type="hidden">
         </div>
         <div class="class-grid">
           <input id="className2" type="text" placeholder="Class 2 name">
           <input id="classUrl2" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster">
           <input id="classTargetMinutes2" type="number" min="1" step="1" placeholder="Default">
           <input id="classSectionId2" type="text" inputmode="numeric" placeholder="Section ID">
-          <input id="classAssignmentId2" type="text" inputmode="numeric" placeholder="Assignment ID">
+          <select id="classCategoryName2">
+            <option value="">Schoology default</option>
+          </select>
+          <select id="classPeriodName2">
+            <option value="">Schoology default</option>
+          </select>
           <input id="classGradingTaskId2" type="text" inputmode="numeric" placeholder="Optional">
+          <input id="classAssignmentId2" type="hidden">
         </div>
         <div class="class-grid">
           <input id="className3" type="text" placeholder="Class 3 name">
           <input id="classUrl3" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster">
           <input id="classTargetMinutes3" type="number" min="1" step="1" placeholder="Default">
           <input id="classSectionId3" type="text" inputmode="numeric" placeholder="Section ID">
-          <input id="classAssignmentId3" type="text" inputmode="numeric" placeholder="Assignment ID">
+          <select id="classCategoryName3">
+            <option value="">Schoology default</option>
+          </select>
+          <select id="classPeriodName3">
+            <option value="">Schoology default</option>
+          </select>
           <input id="classGradingTaskId3" type="text" inputmode="numeric" placeholder="Optional">
+          <input id="classAssignmentId3" type="hidden">
         </div>
       </section>
 
@@ -164,24 +183,6 @@
             <input id="assignmentDueTime" type="time" value="23:59">
           </label>
           <label>
-            Grading category
-            <select id="assignmentCategoryName">
-              <option value="">Schoology default</option>
-            </select>
-          </label>
-          <label>
-            Grading task
-            <select id="assignmentGradingTaskName">
-              <option value="">Schoology default</option>
-            </select>
-          </label>
-          <label>
-            Grading period
-            <select id="assignmentPeriodName">
-              <option value="">Schoology default</option>
-            </select>
-          </label>
-          <label>
             API base
             <input id="schoologyApiBase" type="url" value="https://api.schoology.com/v1">
           </label>
@@ -196,20 +197,10 @@
         </div>
         <details class="advanced-options">
           <summary>Advanced Schoology IDs</summary>
-          <div class="schoology-grid">
-            <label>
-              Category ID fallback
-              <input id="assignmentCategoryId" type="text" inputmode="numeric" placeholder="Only if category is blank">
-            </label>
-            <label>
-              Period ID fallback
-              <input id="assignmentPeriodId" type="text" inputmode="numeric" placeholder="Only if period is blank">
-            </label>
-            <label>
-              Grading task ID fallback
-              <input id="assignmentGradingTaskId" type="text" inputmode="numeric" placeholder="Only if task is blank">
-            </label>
-          </div>
+          <p class="muted">Assignment IDs are saved internally after creation.</p>
+          <input id="assignmentCategoryId" type="hidden">
+          <input id="assignmentPeriodId" type="hidden">
+          <input id="assignmentGradingTaskId" type="hidden">
         </details>
         <div id="assignmentTable" class="table empty">No Schoology assignment preparation yet.</div>
         <div id="schoologyPreviewTable" class="table empty">No Schoology grade preview yet.</div>
