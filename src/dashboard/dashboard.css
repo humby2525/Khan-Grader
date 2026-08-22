@@ -228,6 +228,10 @@ select {
   grid-template-columns: minmax(110px, 0.7fr) minmax(170px, 1fr) minmax(170px, 1fr) 80px 80px 70px minmax(130px, 0.8fr);
 }
 
+.row.assignment-preview {
+  grid-template-columns: minmax(120px, 0.8fr) minmax(240px, 1.5fr) 120px minmax(160px, 1fr);
+}
+
 .row:nth-child(even) {
   background: #f7f9fa;
 }

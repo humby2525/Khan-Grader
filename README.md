@@ -46,7 +46,7 @@ For weekly use across multiple classes:
 1. Paste each Khan class Roster URL into **Saved Classes**.
 2. Give each class a short class name.
 3. Optionally add class-specific goal minutes. Blank uses the default required minutes.
-4. Add the matching Schoology section ID and Schoology assignment ID for each class.
+4. Add the matching Schoology section ID for each class. Assignment ID can be filled manually or created with **Find/Create Assignments**.
 5. Click **Save Classes**.
 6. Choose the start and end dates.
 7. Click **Capture All Classes**.
@@ -81,7 +81,26 @@ grade = min(max points, round(minutes / goal minutes * max points))
 
 Each saved class can have its own goal minutes. If a class goal is blank, the extension uses the default required minutes.
 
-The first Schoology version uses existing assignment IDs. It does not create Schoology assignments automatically.
+## Prepare Schoology assignments
+
+Use **Find/Create Assignments** before the week starts if you want students to see the Khan assignment in Schoology.
+
+1. Choose the week start and end dates.
+2. Enter an assignment title template, such as `Khan Active Minutes - Week of {startDate}`.
+3. Enter a due time.
+4. Make sure each class has a Schoology section ID.
+5. Click **Find/Create Assignments**.
+
+The extension checks each section for an existing assignment with the exact same title. If it finds one, it reuses that assignment ID. If it does not find one, it creates a published, count-in-grade assignment using the max points from the grading settings and saves the returned assignment ID into the class row.
+
+Supported title placeholders:
+
+```text
+{startDate}  example: Aug 24
+{endDate}    example: Aug 30
+{startIso}   example: 2026-08-24
+{endIso}     example: 2026-08-30
+```
 
 ## Schoology-only test mode
 

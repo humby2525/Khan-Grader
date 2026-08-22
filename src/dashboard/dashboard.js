@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.9.4";
+const BUILD_VERSION = "0.10.0";
 const STORAGE_KEY = "khanGrader.lastCapture";
 const CLASS_CONFIG_STORAGE_KEY = "khanGrader.classConfigs";
 const SCHOOLOGY_CONFIG_STORAGE_KEY = "khanGrader.schoologyConfig";
@@ -25,6 +25,7 @@ async function init() {
   elements.openKhanButton.addEventListener("click", () => chrome.tabs.create({ url: "https://classroom.khanacademy.org/" }));
   elements.saveClassesButton.addEventListener("click", saveClassConfigs);
   elements.saveSchoologyButton.addEventListener("click", saveSchoologyConfig);
+  elements.prepareAssignmentsButton.addEventListener("click", prepareSchoologyAssignments);
   elements.previewSchoologyButton.addEventListener("click", previewSchoologyGrades);
   elements.previewSchoologyTestButton.addEventListener("click", previewSchoologyTestGrades);
   elements.sendSchoologyButton.addEventListener("click", sendSchoologyGrades);
@@ -97,6 +98,8 @@ function loadSchoologyConfig(config) {
   elements.gradeTargetMinutes.value = config.gradeTargetMinutes || 50;
   elements.gradeMaxPoints.value = config.gradeMaxPoints || 100;
   elements.schoologyTestMinutes.value = config.testMinutes ?? 50;
+  elements.assignmentTitleTemplate.value = config.assignmentTitleTemplate || "Khan Active Minutes - Week of {startDate}";
+  elements.assignmentDueTime.value = config.assignmentDueTime || "23:59";
   elements.schoologyApiBase.value = config.apiBase || "https://api.schoology.com/v1";
   elements.schoologyConsumerKey.value = config.consumerKey || "";
   elements.schoologyConsumerSecret.value = config.consumerSecret || "";
@@ -108,6 +111,8 @@ function readSchoologyConfig() {
     gradeTargetMinutes: Number(elements.gradeTargetMinutes.value || 50),
     gradeMaxPoints: Number(elements.gradeMaxPoints.value || 100),
     testMinutes: Number(elements.schoologyTestMinutes.value || 0),
+    assignmentTitleTemplate: compactText(elements.assignmentTitleTemplate.value) || "Khan Active Minutes - Week of {startDate}",
+    assignmentDueTime: compactText(elements.assignmentDueTime.value) || "23:59",
     apiBase: compactText(elements.schoologyApiBase.value) || "https://api.schoology.com/v1",
     consumerKey: compactText(elements.schoologyConsumerKey.value),
     consumerSecret: compactText(elements.schoologyConsumerSecret.value)
@@ -985,6 +990,66 @@ async function copyNetworkProbe() {
   setStatus("Network probe copied.");
 }
 
+async function prepareSchoologyAssignments() {
+  const schoologyConfig = readSchoologyConfig();
+  const validation = validateSchoologyConfig(schoologyConfig);
+  if (validation) {
+    setError(validation);
+    return;
+  }
+
+  const startDate = elements.weekStart.value;
+  const endDate = elements.weekEnd.value;
+  if (!startDate || !endDate) {
+    setError("Choose a start date and end date before finding or creating Schoology assignments.");
+    return;
+  }
+  if (startDate > endDate) {
+    setError("The start date must be before or equal to the end date.");
+    return;
+  }
+
+  const classConfigs = readClassConfigs();
+  const targetValidation = validateClassTargetMinutes(classConfigs);
+  if (targetValidation) {
+    setError(targetValidation);
+    return;
+  }
+  const assignmentClassConfigs = classConfigs.filter((config) => config.schoologySectionId);
+  if (!assignmentClassConfigs.length) {
+    setError("Add at least one Schoology section ID before finding or creating assignments.");
+    return;
+  }
+
+  await chrome.storage.local.set({
+    [CLASS_CONFIG_STORAGE_KEY]: classConfigs,
+    [SCHOOLOGY_CONFIG_STORAGE_KEY]: schoologyConfig
+  });
+
+  const previousDisabled = setCaptureButtonsDisabled(true);
+  try {
+    setStatus(`Finding or creating Schoology assignments for ${assignmentClassConfigs.length} section(s)...`);
+    const result = await findOrCreateSchoologyAssignments(assignmentClassConfigs, schoologyConfig, startDate, endDate);
+    const updatedConfigs = applyAssignmentIdsToClassConfigs(classConfigs, result.rows);
+    loadClassConfigs(updatedConfigs);
+    await chrome.storage.local.set({ [CLASS_CONFIG_STORAGE_KEY]: updatedConfigs });
+    renderAssignmentResults(result);
+    lastSchoologyPreview = null;
+    renderSchoologyPreview(null);
+
+    const createdCount = result.rows.filter((row) => row.status === "created").length;
+    const foundCount = result.rows.filter((row) => row.status === "found").length;
+    const errorCount = result.rows.filter((row) => row.status === "error").length;
+    setStatus(errorCount
+      ? `Assignments ready for ${foundCount + createdCount} class(es); ${errorCount} failed.`
+      : `Assignments ready: ${foundCount} found, ${createdCount} created.`);
+  } catch (error) {
+    setError(error.message || String(error));
+  } finally {
+    restoreCaptureButtonsDisabled(previousDisabled);
+  }
+}
+
 async function previewSchoologyGrades() {
   const schoologyConfig = readSchoologyConfig();
   const validation = validateSchoologyConfig(schoologyConfig);
@@ -1138,6 +1203,129 @@ function getCapturedStudentSummaries() {
   if (rows.length) return rows.filter((row) => row.studentName && !row.error);
   const summary = lastCapture?.studentSummary;
   return hasStudentSummary(summary) && summary.studentName ? [summary] : [];
+}
+
+async function findOrCreateSchoologyAssignments(classConfigs, schoologyConfig, startDate, endDate) {
+  const title = renderAssignmentTitle(schoologyConfig.assignmentTitleTemplate, startDate, endDate);
+  const due = formatSchoologyDueDate(endDate, schoologyConfig.assignmentDueTime);
+  const rows = [];
+
+  for (const classConfig of classConfigs) {
+    try {
+      const assignments = await fetchSchoologyAssignments(classConfig.schoologySectionId, schoologyConfig);
+      const existing = assignments.find((assignment) => compactText(assignment.title) === title);
+      if (existing?.id) {
+        rows.push({
+          className: classConfig.name || "",
+          sectionId: classConfig.schoologySectionId,
+          assignmentId: String(existing.id),
+          title,
+          status: "found"
+        });
+        continue;
+      }
+
+      const created = await createSchoologyAssignment(classConfig, schoologyConfig, title, due);
+      rows.push({
+        className: classConfig.name || "",
+        sectionId: classConfig.schoologySectionId,
+        assignmentId: String(created.id || created.grade_item_id || ""),
+        title,
+        status: "created"
+      });
+    } catch (error) {
+      rows.push({
+        className: classConfig.name || "",
+        sectionId: classConfig.schoologySectionId,
+        assignmentId: "",
+        title,
+        status: "error",
+        error: error.message || String(error)
+      });
+    }
+  }
+
+  return {
+    build: BUILD_VERSION,
+    createdAt: new Date().toISOString(),
+    title,
+    due,
+    rows
+  };
+}
+
+async function fetchSchoologyAssignments(sectionId, schoologyConfig) {
+  const json = await schoologyFetchJson(`/sections/${encodeURIComponent(sectionId)}/assignments?limit=200`, {
+    method: "GET"
+  }, schoologyConfig);
+  return normalizeArray(json?.assignment);
+}
+
+async function createSchoologyAssignment(classConfig, schoologyConfig, title, due) {
+  const json = await schoologyFetchJson(`/sections/${encodeURIComponent(classConfig.schoologySectionId)}/assignments`, {
+    method: "POST",
+    body: {
+      title,
+      description: `Khan Academy active minutes for ${title}.`,
+      due,
+      max_points: schoologyConfig.gradeMaxPoints,
+      factor: 1,
+      published: 1,
+      count_in_grade: 1,
+      auto_publish_grades: 1,
+      show_comments: 1,
+      allow_dropbox: 0,
+      allow_discussion: 0
+    }
+  }, schoologyConfig);
+  if (!json?.id && !json?.grade_item_id) {
+    throw new Error(`Schoology created an assignment for ${classConfig.name}, but did not return an assignment ID.`);
+  }
+  return json;
+}
+
+function applyAssignmentIdsToClassConfigs(classConfigs, rows) {
+  const assignmentsBySection = new Map(rows
+    .filter((row) => row.assignmentId)
+    .map((row) => [String(row.sectionId), String(row.assignmentId)]));
+
+  return classConfigs.map((config) => ({
+    ...config,
+    schoologyAssignmentId: assignmentsBySection.get(String(config.schoologySectionId)) || config.schoologyAssignmentId || ""
+  }));
+}
+
+function renderAssignmentTitle(template, startDate, endDate) {
+  const start = parseLocalDate(startDate);
+  const end = parseLocalDate(endDate);
+  const values = {
+    startDate: formatShortDate(start),
+    endDate: formatShortDate(end),
+    startIso: startDate,
+    endIso: endDate
+  };
+  return compactText((template || "Khan Active Minutes - Week of {startDate}")
+    .replace(/\{startDate\}/g, values.startDate)
+    .replace(/\{endDate\}/g, values.endDate)
+    .replace(/\{startIso\}/g, values.startIso)
+    .replace(/\{endIso\}/g, values.endIso));
+}
+
+function formatSchoologyDueDate(endDate, dueTime) {
+  const time = /^\d{2}:\d{2}$/.test(dueTime || "") ? dueTime : "23:59";
+  return `${endDate} ${time}:00`;
+}
+
+function parseLocalDate(value) {
+  const [year, month, day] = String(value || "").split("-").map(Number);
+  return new Date(year, (month || 1) - 1, day || 1);
+}
+
+function formatShortDate(date) {
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric"
+  });
 }
 
 async function buildSchoologyPreview(students, classConfigs, schoologyConfig) {
@@ -1397,6 +1585,8 @@ function validateSchoologyConfig(config) {
   if (!Number.isFinite(config.gradeTargetMinutes) || config.gradeTargetMinutes <= 0) return "Required minutes must be greater than zero.";
   if (!Number.isFinite(config.gradeMaxPoints) || config.gradeMaxPoints <= 0) return "Max points must be greater than zero.";
   if (!Number.isFinite(config.testMinutes) || config.testMinutes < 0) return "Test minutes must be zero or greater.";
+  if (!config.assignmentTitleTemplate) return "Enter an assignment title template.";
+  if (!/^\d{2}:\d{2}$/.test(config.assignmentDueTime || "")) return "Due time must be in HH:MM format.";
   try {
     const url = new URL(config.apiBase);
     if (!/^https:$/i.test(url.protocol)) return "Schoology API base must start with https://.";
@@ -1441,6 +1631,42 @@ function renderSchoologyPreview(preview) {
     `;
     elements.schoologyPreviewTable.append(line);
   }
+}
+
+function renderAssignmentResults(result) {
+  const rows = result?.rows || [];
+  elements.assignmentTable.className = rows.length ? "table" : "table empty";
+  elements.assignmentTable.innerHTML = "";
+
+  if (!rows.length) {
+    elements.assignmentTable.textContent = "No Schoology assignment preparation yet.";
+    return;
+  }
+
+  const header = document.createElement("div");
+  header.className = "row assignment-preview header";
+  header.innerHTML = "<div>Class</div><div>Assignment</div><div>ID</div><div>Status</div>";
+  elements.assignmentTable.append(header);
+
+  for (const row of rows) {
+    const line = document.createElement("div");
+    line.className = "row assignment-preview";
+    line.innerHTML = `
+      <div>${escapeHtml(row.className || "")}</div>
+      <div>${escapeHtml(row.title || "")}</div>
+      <div>${escapeHtml(row.assignmentId || "")}</div>
+      <div>${escapeHtml(formatAssignmentStatus(row.status))}${row.error ? `<div class="source">${escapeHtml(row.error)}</div>` : ""}</div>
+    `;
+    elements.assignmentTable.append(line);
+  }
+}
+
+function formatAssignmentStatus(status) {
+  return {
+    found: "Found existing",
+    created: "Created",
+    error: "Error"
+  }[status] || status || "";
 }
 
 function formatPreviewStatus(status) {
@@ -1661,6 +1887,7 @@ function setCaptureButtonsDisabled(disabled) {
     elements.captureButton,
     elements.saveClassesButton,
     elements.saveSchoologyButton,
+    elements.prepareAssignmentsButton,
     elements.previewSchoologyButton,
     elements.previewSchoologyTestButton,
     elements.sendSchoologyButton

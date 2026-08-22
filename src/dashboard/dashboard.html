@@ -13,7 +13,7 @@
           <h1>Khan Grader</h1>
           <p>Capture Khan Academy class or student activity minutes.</p>
         </div>
-        <span id="build">v0.9.4</span>
+        <span id="build">v0.10.0</span>
       </header>
 
       <section class="panel controls">
@@ -109,6 +109,7 @@
           <h2>Grading & Schoology</h2>
           <div class="button-row">
             <button id="saveSchoologyButton" class="secondary" type="button">Save Settings</button>
+            <button id="prepareAssignmentsButton" class="secondary" type="button">Find/Create Assignments</button>
             <button id="previewSchoologyButton" type="button">Preview Schoology Grades</button>
             <button id="previewSchoologyTestButton" class="secondary" type="button">Preview Test Grades</button>
             <button id="sendSchoologyButton" type="button">Send Grades to Schoology</button>
@@ -135,6 +136,14 @@
             <input id="schoologyTestMinutes" type="number" min="0" step="1" value="50">
           </label>
           <label>
+            Assignment title
+            <input id="assignmentTitleTemplate" type="text" value="Khan Active Minutes - Week of {startDate}">
+          </label>
+          <label>
+            Due time
+            <input id="assignmentDueTime" type="time" value="23:59">
+          </label>
+          <label>
             API base
             <input id="schoologyApiBase" type="url" value="https://api.schoology.com/v1">
           </label>
@@ -147,6 +156,7 @@
             <input id="schoologyConsumerSecret" type="password" autocomplete="off">
           </label>
         </div>
+        <div id="assignmentTable" class="table empty">No Schoology assignment preparation yet.</div>
         <div id="schoologyPreviewTable" class="table empty">No Schoology grade preview yet.</div>
       </section>
 
