@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.8.0";
+const BUILD_VERSION = "0.8.1";
 const STORAGE_KEY = "khanGrader.lastCapture";
 const CLASS_CONFIG_STORAGE_KEY = "khanGrader.classConfigs";
 
@@ -362,6 +362,8 @@ async function captureAllClassesViaApi() {
       startDate,
       endDate,
       diagnostics,
+      failedClass: error.classConfig || null,
+      failedRoster: error.rosterResult || null,
       error: error.message || String(error)
     };
     elements.networkProbe.textContent = JSON.stringify(lastNetworkProbe, null, 2);
@@ -524,17 +526,24 @@ async function captureKhanClassBySwitching(tab, startDate, endDate) {
 
 async function captureConfiguredClass(config, startDate, endDate) {
   let tab = null;
+  let rosterResult = null;
   try {
     tab = await chrome.tabs.create({ url: config.url, active: false });
     await waitForTabReady(tab.id, 20000);
-    await delay(1500);
-
-    const loadedTab = await chrome.tabs.get(tab.id);
-    const rosterResult = await collectKhanRoster(loadedTab);
+    rosterResult = await waitForRosterStudents(tab.id, config.name, 12000);
     if (rosterResult.students.length <= 1) {
-      throw new Error(`${config.name}: only found ${rosterResult.students.length} student(s) on the roster page.`);
+      await chrome.tabs.reload(tab.id);
+      await waitForTabReady(tab.id, 20000);
+      rosterResult = await waitForRosterStudents(tab.id, config.name, 12000);
+    }
+    if (rosterResult.students.length <= 1) {
+      const error = new Error(`${config.name}: only found ${rosterResult.students.length} student(s) on the roster page after waiting. Open that roster page once in Chrome, confirm students are visible, then try Capture All Classes again.`);
+      error.classConfig = config;
+      error.rosterResult = rosterResult;
+      throw error;
     }
 
+    const loadedTab = await chrome.tabs.get(tab.id);
     const apiResult = await requestKhanActivitiesForRoster(loadedTab, rosterResult.students, startDate, endDate);
     const capture = buildClassApiCapture(loadedTab, {
       ...rosterResult,
@@ -575,6 +584,29 @@ async function captureConfiguredClass(config, startDate, endDate) {
       }
     }
   }
+}
+
+async function waitForRosterStudents(tabId, className, timeoutMs) {
+  const startedAt = Date.now();
+  let bestRoster = {
+    students: [],
+    frameReports: [],
+    pageUrl: "",
+    pageTitle: ""
+  };
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const tab = await chrome.tabs.get(tabId);
+    const rosterResult = await collectKhanRoster(tab);
+    if (rosterResult.students.length > bestRoster.students.length) {
+      bestRoster = rosterResult;
+      setStatus(`Loading ${className} roster: found ${bestRoster.students.length} student(s)...`);
+    }
+    if (rosterResult.students.length > 1) return rosterResult;
+    await delay(750);
+  }
+
+  return bestRoster;
 }
 
 function buildApiCapture(tab, pageCapture, apiResult, startDate, endDate) {
