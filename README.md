@@ -87,22 +87,28 @@ Each saved class can have its own goal minutes. If a class goal is blank, the ex
 
 Use **Find/Create Assignments** before the week starts if you want students to see the Khan assignment in Schoology.
 
+Set up Schoology choices once for each class:
+
+1. Enter the Schoology API key and secret under **Grading & Schoology**, then save the settings.
+2. Add each class's Schoology section ID under **Class Setup**.
+3. Click **Refresh Categories & Periods** to load the category and grading-period choices from each section.
+4. Choose the category and period for each class, enter its task ID if needed, and click **Save Classes**.
+5. Refresh these choices again only when adding a class or changing to a new marking period.
+
+For each weekly assignment:
+
 1. Choose the week start and end dates.
 2. Enter an assignment title template, such as `Khan Minutes - Week of {startDate}`.
 3. Enter a due date and due time. If due date is blank, the extension uses the selected week end date.
-4. Make sure each class has a Schoology section ID.
-5. Click **Load Grade Options** to fill each class row's grading category and grading period dropdowns from that class's Schoology section.
-6. Choose the grading category and grading period in each class row.
-7. If you need a task ID, open a Schoology assignment create or edit page for each class and click **Read Schoology Page Dropdowns**. When the page URL includes the matching section ID, the extension saves that class's task ID in the Saved Classes row.
-8. Click **Find/Create Assignments**.
+4. Click **Find/Create Assignments**.
 
 The extension checks each section for an existing assignment with the exact same title. If it finds one, it reuses that assignment ID only when it also matches the selected assignment settings. If it does not find one, it creates a published, count-in-grade assignment using the max points, due date, due time, grading category, and grading period from the grading settings and saves the returned assignment ID internally. The assignment description tells students to spend the class goal minutes on Khan that week.
 
-Schoology category, period, and task IDs can differ by section even when the visible name is the same. For that reason, the normal workflow is to choose category and period in each class row. The assignment ID is hidden because the extension manages it after **Find/Create Assignments**.
+Schoology category, period, and task IDs can differ by section even when the visible name is the same. For that reason, category, period, and optional task ID are saved with each class. The assignment ID is hidden because the extension manages it after **Find/Create Assignments**.
 
 After finding or creating each assignment, the extension fetches it back from Schoology and shows the published, available, count-in-grade, due date, category, period, points, and API self link in the assignment results table. If Schoology still returns an old matching title that is not usable, the extension marks it as skipped and creates a new assignment. If the Schoology page does not show the assignment, copy the Network Probe output after running **Find/Create Assignments**.
 
-Schoology's public assignment API documents `grading_category` and `grading_period` for assignment creation. It does not document a matching assignment field or option endpoint for the Schoology UI's grading task dropdown. The extension tries the API first, then can read the grading task options from the actual Schoology assignment page. It includes an optional `grading_task` field for testing, but your Schoology tenant may reject or ignore it.
+Schoology's public assignment API documents `grading_category` and `grading_period` for assignment creation. It does not document a matching assignment field or option endpoint for the Schoology UI's grading task dropdown. The extension includes the optional per-class task ID in assignment creation, but your Schoology tenant may reject or ignore it.
 
 Supported title placeholders:
 

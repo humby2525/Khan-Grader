@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.14.0";
+const BUILD_VERSION = "0.14.1";
 const DEFAULT_ASSIGNMENT_TITLE_TEMPLATE = "Khan Minutes - Week of {startDate}";
 const LEGACY_ASSIGNMENT_TITLE_TEMPLATE = "Khan Active Minutes - Week of {startDate}";
 const STORAGE_KEY = "khanGrader.lastCapture";
@@ -28,7 +28,6 @@ async function init() {
   elements.saveClassesButton.addEventListener("click", saveClassConfigs);
   elements.saveSchoologyButton.addEventListener("click", saveSchoologyConfig);
   elements.loadSchoologyOptionsButton.addEventListener("click", loadSchoologyAssignmentOptions);
-  elements.readSchoologyPageOptionsButton.addEventListener("click", readSchoologyPageDropdowns);
   elements.prepareAssignmentsButton.addEventListener("click", prepareSchoologyAssignments);
   elements.previewSchoologyButton.addEventListener("click", previewSchoologyGrades);
   elements.previewSchoologyTestButton.addEventListener("click", previewSchoologyTestGrades);
@@ -170,7 +169,7 @@ async function loadSchoologyAssignmentOptions() {
   const classConfigs = readClassConfigs();
   const optionClassConfigs = classConfigs.filter((config) => config.schoologySectionId);
   if (!optionClassConfigs.length) {
-    setError("Add at least one Schoology section ID before loading grade options.");
+    setError("Add at least one Schoology section ID in Class Setup before refreshing categories and periods.");
     return;
   }
 
@@ -181,7 +180,7 @@ async function loadSchoologyAssignmentOptions() {
 
   const previousDisabled = setCaptureButtonsDisabled(true);
   try {
-    setStatus(`Loading Schoology grade options for ${optionClassConfigs.length} section(s)...`);
+    setStatus(`Refreshing Schoology categories and periods for ${optionClassConfigs.length} class(es)...`);
     const sections = await Promise.all(classConfigs.map(async (classConfig, index) => {
       if (!classConfig.schoologySectionId) return null;
       const [categories, gradingPeriods] = await Promise.all([
@@ -206,9 +205,7 @@ async function loadSchoologyAssignmentOptions() {
       note: "Category and period dropdowns are loaded per class from each saved Schoology section ID."
     };
     elements.networkProbe.textContent = JSON.stringify(lastNetworkProbe, null, 2);
-    const categoryTitles = countUniqueOptionTitles(loadedSections.flatMap((section) => section.categories));
-    const periodTitles = countUniqueOptionTitles(loadedSections.flatMap((section) => section.gradingPeriods));
-    setStatus(`Loaded class-specific category and period options for ${loadedSections.length} section(s): ${categoryTitles} categor${categoryTitles === 1 ? "y" : "ies"} and ${periodTitles} period${periodTitles === 1 ? "" : "s"}.`);
+    setStatus(`Refreshed categories and periods for ${loadedSections.length} class(es). Choose any new marking periods, then click Save Classes.`);
   } catch (error) {
     setError(error.message || String(error));
   } finally {
@@ -2122,7 +2119,8 @@ function populateSchoologyNameSelect(select, rows, defaultLabel, emptyLabel) {
     select.append(option);
   }
 
-  setSelectValueWithStoredOption(select, previousValue);
+  const previousStillAvailable = Array.from(select.options).some((option) => option.value === previousValue);
+  select.value = previousStillAvailable ? previousValue : "";
 }
 
 function mergeSchoologyNameSelectOptions(select, rows) {
@@ -2208,15 +2206,6 @@ function formatAvailableSchoologyOptionTitles(rows) {
     .map((row) => getSchoologyOptionTitle(row))
     .filter(Boolean)
     .join(", ");
-}
-
-function countUniqueOptionTitles(rows) {
-  const titles = new Set();
-  for (const row of rows) {
-    const title = getSchoologyOptionTitle(row);
-    if (title) titles.add(normalizeName(title));
-  }
-  return titles.size;
 }
 
 function addOptionalSchoologyId(body, fieldName, value) {
@@ -2584,7 +2573,6 @@ function setCaptureButtonsDisabled(disabled) {
     elements.saveClassesButton,
     elements.saveSchoologyButton,
     elements.loadSchoologyOptionsButton,
-    elements.readSchoologyPageOptionsButton,
     elements.prepareAssignmentsButton,
     elements.previewSchoologyButton,
     elements.previewSchoologyTestButton,
