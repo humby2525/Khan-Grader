@@ -45,10 +45,11 @@ For weekly use across multiple classes:
 
 1. Paste each Khan class Roster URL into **Saved Classes**.
 2. Give each class a short class name.
-3. Add the matching Schoology section ID and Schoology assignment ID for each class.
-4. Click **Save Classes**.
-5. Choose the start and end dates.
-6. Click **Capture All Classes**.
+3. Optionally add class-specific goal minutes. Blank uses the default required minutes.
+4. Add the matching Schoology section ID and Schoology assignment ID for each class.
+5. Click **Save Classes**.
+6. Choose the start and end dates.
+7. Click **Capture All Classes**.
 
 The extension opens each saved roster page in a temporary Chrome tab, captures that class, closes the temporary tab, then combines all rows into one table and CSV. The saved class list stays in `chrome.storage.local` on this Chrome profile.
 
@@ -58,7 +59,7 @@ Schoology writes are review-first. Capturing Khan data does not send anything to
 
 1. Enter the grading settings in **Grading & Schoology**:
    - Grade from: Time on task or Exercises
-   - Required minutes
+   - Default required minutes
    - Max points
 2. Enter the Schoology API base, consumer key, and consumer secret.
 3. Click **Save Settings**.
@@ -75,8 +76,10 @@ Schoology writes are review-first. Capturing Khan data does not send anything to
 The grade formula is:
 
 ```text
-grade = min(max points, round(minutes / required minutes * max points))
+grade = min(max points, round(minutes / goal minutes * max points))
 ```
+
+Each saved class can have its own goal minutes. If a class goal is blank, the extension uses the default required minutes.
 
 The first Schoology version uses existing assignment IDs. It does not create Schoology assignments automatically.
 

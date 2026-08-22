@@ -67,7 +67,7 @@ async function schoologyFetchJson(path, options, schoologyConfig) {
       body: bodyText
     });
   } catch (error) {
-    throw new Error(`Schoology background request failed before the API responded for ${url.origin}. Confirm the dashboard says v0.9.3, reload the extension in chrome://extensions, and keep API base as https://api.schoology.com/v1. Details: ${error.message || String(error)}`);
+    throw new Error(`Schoology background request failed before the API responded for ${url.origin}. Confirm the dashboard version is current, reload the extension in chrome://extensions, and keep API base as https://api.schoology.com/v1. Details: ${error.message || String(error)}`);
   }
 
   const text = await response.text();

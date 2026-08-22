@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.9.3";
+const BUILD_VERSION = "0.9.4";
 const STORAGE_KEY = "khanGrader.lastCapture";
 const CLASS_CONFIG_STORAGE_KEY = "khanGrader.classConfigs";
 const SCHOOLOGY_CONFIG_STORAGE_KEY = "khanGrader.schoologyConfig";
@@ -49,6 +49,7 @@ function loadClassConfigs(configs) {
     const config = configs[index] || {};
     elements[`className${index + 1}`].value = config.name || "";
     elements[`classUrl${index + 1}`].value = config.url || "";
+    elements[`classTargetMinutes${index + 1}`].value = config.targetMinutes || "";
     elements[`classSectionId${index + 1}`].value = config.schoologySectionId || "";
     elements[`classAssignmentId${index + 1}`].value = config.schoologyAssignmentId || "";
   }
@@ -59,12 +60,15 @@ function readClassConfigs() {
   for (let index = 1; index <= 3; index += 1) {
     const name = compactText(elements[`className${index}`].value);
     const url = compactText(elements[`classUrl${index}`].value);
+    const targetMinutesText = compactText(elements[`classTargetMinutes${index}`].value);
+    const targetMinutes = targetMinutesText ? Number(targetMinutesText) : null;
     const schoologySectionId = compactText(elements[`classSectionId${index}`].value);
     const schoologyAssignmentId = compactText(elements[`classAssignmentId${index}`].value);
-    if (!name && !url && !schoologySectionId && !schoologyAssignmentId) continue;
+    if (!name && !url && !targetMinutesText && !schoologySectionId && !schoologyAssignmentId) continue;
     configs.push({
       name: name || `Class ${index}`,
       url,
+      targetMinutes,
       schoologySectionId,
       schoologyAssignmentId
     });
@@ -74,12 +78,16 @@ function readClassConfigs() {
 
 async function saveClassConfigs() {
   const configs = readClassConfigs();
+  const targetValidation = validateClassTargetMinutes(configs);
+  if (targetValidation) {
+    setError(targetValidation);
+    return;
+  }
   const invalid = configs.find((config) => !isValidKhanUrl(config.url));
   if (invalid) {
     setError(`Check the roster URL for ${invalid.name}. It should be a khanacademy.org URL.`);
     return;
   }
-
   await chrome.storage.local.set({ [CLASS_CONFIG_STORAGE_KEY]: configs });
   setStatus(`Saved ${configs.length} class roster URL(s).`);
 }
@@ -992,6 +1000,11 @@ async function previewSchoologyGrades() {
   }
 
   const classConfigs = readClassConfigs();
+  const targetValidation = validateClassTargetMinutes(classConfigs);
+  if (targetValidation) {
+    setError(targetValidation);
+    return;
+  }
   await chrome.storage.local.set({
     [CLASS_CONFIG_STORAGE_KEY]: classConfigs,
     [SCHOOLOGY_CONFIG_STORAGE_KEY]: schoologyConfig
@@ -1024,6 +1037,11 @@ async function previewSchoologyTestGrades() {
   }
 
   const classConfigs = readClassConfigs();
+  const targetValidation = validateClassTargetMinutes(classConfigs);
+  if (targetValidation) {
+    setError(targetValidation);
+    return;
+  }
   const testClassConfigs = classConfigs.filter((config) => config.schoologySectionId);
   if (!testClassConfigs.length) {
     setError("Add at least one Schoology section ID before previewing test grades.");
@@ -1193,7 +1211,8 @@ async function buildSchoologyRosterTestPreview(classConfigs, schoologyConfig) {
       if (!name || !enrollmentId) continue;
 
       const minutes = Number(schoologyConfig.testMinutes || 0);
-      const grade = calculateGrade(minutes, grading.targetMinutes, grading.maxPoints);
+      const targetMinutes = resolveTargetMinutes(classConfig, grading.targetMinutes);
+      const grade = calculateGrade(minutes, targetMinutes, grading.maxPoints);
       rows.push({
         className: classConfig.name || "",
         studentName: name,
@@ -1203,10 +1222,11 @@ async function buildSchoologyRosterTestPreview(classConfigs, schoologyConfig) {
         enrollmentId,
         metricMinutes: minutes,
         grade,
+        targetMinutes,
         dateRange: "Schoology roster test",
         status: classConfig.schoologyAssignmentId ? "ready" : "missing_assignment",
         testMode: true,
-        comment: `TEST Khan Grader: ${minutes} min; target ${grading.targetMinutes} min`
+        comment: `TEST Khan Grader: ${minutes} min; target ${targetMinutes} min`
       });
     }
   }
@@ -1224,7 +1244,8 @@ async function buildSchoologyRosterTestPreview(classConfigs, schoologyConfig) {
 
 function buildGradePreviewRow(student, classConfig, grading) {
   const minutes = Number(student[grading.metric] || 0);
-  const grade = calculateGrade(minutes, grading.targetMinutes, grading.maxPoints);
+  const targetMinutes = resolveTargetMinutes(classConfig, grading.targetMinutes);
+  const grade = calculateGrade(minutes, targetMinutes, grading.maxPoints);
   const dateRange = student.detectedDateRange || lastCapture?.dateRange || "";
   return {
     className: student.className || "",
@@ -1235,10 +1256,16 @@ function buildGradePreviewRow(student, classConfig, grading) {
     enrollmentId: "",
     metricMinutes: minutes,
     grade,
+    targetMinutes,
     dateRange,
     status: "ready",
-    comment: `Khan ${grading.metricLabel}: ${minutes} min; target ${grading.targetMinutes} min; ${dateRange}`
+    comment: `Khan ${grading.metricLabel}: ${minutes} min; target ${targetMinutes} min; ${dateRange}`
   };
+}
+
+function resolveTargetMinutes(classConfig, defaultTargetMinutes) {
+  const classTargetMinutes = Number(classConfig?.targetMinutes);
+  return Number.isFinite(classTargetMinutes) && classTargetMinutes > 0 ? classTargetMinutes : defaultTargetMinutes;
 }
 
 function calculateGrade(minutes, targetMinutes, maxPoints) {
@@ -1380,6 +1407,11 @@ function validateSchoologyConfig(config) {
   return "";
 }
 
+function validateClassTargetMinutes(configs) {
+  const invalidTarget = configs.find((config) => config.targetMinutes !== null && (!Number.isFinite(config.targetMinutes) || config.targetMinutes <= 0));
+  return invalidTarget ? `Check the goal minutes for ${invalidTarget.name}. It should be blank or greater than zero.` : "";
+}
+
 function renderSchoologyPreview(preview) {
   const rows = preview?.rows || [];
   elements.schoologyPreviewTable.className = rows.length ? "table" : "table empty";
@@ -1392,7 +1424,7 @@ function renderSchoologyPreview(preview) {
 
   const header = document.createElement("div");
   header.className = "row schoology-preview header";
-  header.innerHTML = `<div>Class</div><div>${preview?.testMode ? "Schoology student" : "Khan student"}</div><div>Schoology match</div><div>Minutes</div><div>Grade</div><div>Status</div>`;
+  header.innerHTML = `<div>Class</div><div>${preview?.testMode ? "Schoology student" : "Khan student"}</div><div>Schoology match</div><div>Minutes</div><div>Goal</div><div>Grade</div><div>Status</div>`;
   elements.schoologyPreviewTable.append(header);
 
   for (const row of rows) {
@@ -1403,6 +1435,7 @@ function renderSchoologyPreview(preview) {
       <div>${escapeHtml(row.studentName || "")}</div>
       <div>${escapeHtml(row.schoologyName || "")}${row.enrollmentId ? `<div class="source">Enrollment ${escapeHtml(row.enrollmentId)}</div>` : ""}</div>
       <div>${escapeHtml(formatMinutes(row.metricMinutes))}</div>
+      <div>${escapeHtml(formatMinutes(row.targetMinutes))}</div>
       <div>${escapeHtml(row.grade)}</div>
       <div>${escapeHtml(formatPreviewStatus(row.status))}${row.error ? `<div class="source">${escapeHtml(row.error)}</div>` : ""}</div>
     `;

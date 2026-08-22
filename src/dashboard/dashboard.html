@@ -13,7 +13,7 @@
           <h1>Khan Grader</h1>
           <p>Capture Khan Academy class or student activity minutes.</p>
         </div>
-        <span id="build">v0.9.3</span>
+        <span id="build">v0.9.4</span>
       </header>
 
       <section class="panel controls">
@@ -46,24 +46,28 @@
         <div class="class-grid header">
           <div>Class</div>
           <div>Khan roster URL</div>
+          <div>Goal minutes</div>
           <div>Schoology section ID</div>
           <div>Schoology assignment ID</div>
         </div>
         <div class="class-grid">
           <input id="className1" type="text" placeholder="Class 1 name">
           <input id="classUrl1" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster">
+          <input id="classTargetMinutes1" type="number" min="1" step="1" placeholder="Default">
           <input id="classSectionId1" type="text" inputmode="numeric" placeholder="Section ID">
           <input id="classAssignmentId1" type="text" inputmode="numeric" placeholder="Assignment ID">
         </div>
         <div class="class-grid">
           <input id="className2" type="text" placeholder="Class 2 name">
           <input id="classUrl2" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster">
+          <input id="classTargetMinutes2" type="number" min="1" step="1" placeholder="Default">
           <input id="classSectionId2" type="text" inputmode="numeric" placeholder="Section ID">
           <input id="classAssignmentId2" type="text" inputmode="numeric" placeholder="Assignment ID">
         </div>
         <div class="class-grid">
           <input id="className3" type="text" placeholder="Class 3 name">
           <input id="classUrl3" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster">
+          <input id="classTargetMinutes3" type="number" min="1" step="1" placeholder="Default">
           <input id="classSectionId3" type="text" inputmode="numeric" placeholder="Section ID">
           <input id="classAssignmentId3" type="text" inputmode="numeric" placeholder="Assignment ID">
         </div>
@@ -119,7 +123,7 @@
             </select>
           </label>
           <label>
-            Required minutes
+            Default required minutes
             <input id="gradeTargetMinutes" type="number" min="1" step="1" value="50">
           </label>
           <label>

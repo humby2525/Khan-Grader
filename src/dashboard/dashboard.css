@@ -123,7 +123,7 @@ select {
 .class-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(140px, 0.8fr) minmax(260px, 1.5fr) minmax(140px, 0.7fr) minmax(150px, 0.7fr);
+  grid-template-columns: minmax(130px, 0.8fr) minmax(240px, 1.5fr) minmax(110px, 0.6fr) minmax(130px, 0.7fr) minmax(140px, 0.7fr);
   margin-top: 10px;
 }
 
@@ -225,7 +225,7 @@ select {
 }
 
 .row.schoology-preview {
-  grid-template-columns: minmax(120px, 0.7fr) minmax(180px, 1fr) minmax(180px, 1fr) 90px 80px minmax(140px, 0.8fr);
+  grid-template-columns: minmax(110px, 0.7fr) minmax(170px, 1fr) minmax(170px, 1fr) 80px 80px 70px minmax(130px, 0.8fr);
 }
 
 .row:nth-child(even) {
