@@ -8,11 +8,14 @@ This first version is intentionally Khan-only. It does not connect to Schoology,
 
 1. Open Khan Academy.
 2. Go to Reports -> Individual Student Report -> Activity log.
-3. Choose the student and date range in Khan.
+3. Choose the student in Khan.
 4. Open the Khan Grader extension dashboard.
-5. Click **Capture Current Student**.
-6. Review the detected student name, Exercises minutes, Time on task minutes, Khan date range, and diagnostics.
-7. Export CSV if needed.
+5. Choose the start and end dates in Khan Grader.
+6. Click **Capture via Khan API**.
+7. Review the detected student name, Exercises minutes, Time on task minutes, Khan date range, and diagnostics.
+8. Export CSV if needed.
+
+The older **Capture Current Student** button is still available as a rendered-page fallback, but the preferred test path is now **Capture via Khan API**. That API capture uses Khan's logged-in browser session and sends the selected dates directly to Khan's Individual Student Report request. It does not store a Khan or Google password.
 
 ## Network probe
 
@@ -36,4 +39,4 @@ The probe runs only in the current browser session and stores output locally in 
 
 ## Status
 
-This is a capture proof of concept. The main goal is to reliably read the visible Individual Student Report before automating student switching.
+This is a capture proof of concept. The current milestone is one-student structured API capture from the Individual Student Report before automating student switching.

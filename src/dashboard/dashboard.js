@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.4.2";
+const BUILD_VERSION = "0.5.0";
 const STORAGE_KEY = "khanGrader.lastCapture";
 
 const elements = {};
@@ -13,6 +13,7 @@ async function init() {
   }
 
   elements.build.textContent = `v${BUILD_VERSION}`;
+  elements.captureApiButton.addEventListener("click", captureCurrentStudentViaApi);
   elements.captureButton.addEventListener("click", captureCurrentTab);
   elements.startNetworkProbeButton.addEventListener("click", startNetworkProbe);
   elements.collectNetworkProbeButton.addEventListener("click", collectNetworkProbe);
@@ -157,6 +158,45 @@ async function captureCurrentTab() {
   }
 }
 
+async function captureCurrentStudentViaApi() {
+  const startDate = elements.weekStart.value;
+  const endDate = elements.weekEnd.value;
+  if (!startDate || !endDate) {
+    setError("Choose a start date and end date before using the Khan API capture.");
+    return;
+  }
+  if (startDate > endDate) {
+    setError("The start date must be before or equal to the end date.");
+    return;
+  }
+
+  const tab = await findKhanTab();
+  if (!tab?.id) {
+    setError("Open the Khan Individual Student Report tab before using the Khan API capture.");
+    return;
+  }
+
+  setStatus(`Requesting Khan activity data for ${startDate} through ${endDate}...`);
+
+  try {
+    let pageCapture = null;
+    try {
+      pageCapture = await readKhanTab(tab);
+    } catch {
+      pageCapture = null;
+    }
+
+    const apiResult = await requestKhanActivityForCurrentStudent(tab, startDate, endDate);
+    lastCapture = buildApiCapture(tab, pageCapture, apiResult, startDate, endDate);
+
+    await chrome.storage.local.set({ [STORAGE_KEY]: lastCapture });
+    renderCapture(lastCapture);
+    setStatus(`Captured from Khan API: ${lastCapture.studentSummary.studentName || apiResult.studentKaid}, ${formatMinutes(apiResult.exerciseMinutes)} exercises, ${formatMinutes(apiResult.timeOnTaskMinutes)} time on task.`);
+  } catch (error) {
+    setError(error.message || String(error));
+  }
+}
+
 async function findKhanTab() {
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (isKhanTab(activeTab)) return activeTab;
@@ -219,6 +259,80 @@ async function readKhanTab(tab) {
       diagnostics: report.diagnostics,
       textSample: report.textSample
     }))
+  };
+}
+
+async function requestKhanActivityForCurrentStudent(tab, startDate, endDate) {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id, allFrames: true },
+    world: "MAIN",
+    func: requestKhanActivityFromPage,
+    args: [startDate, endDate]
+  });
+
+  const frameResults = results
+    .map((item, index) => ({ frameIndex: index + 1, ...(item.result || {}) }))
+    .filter((result) => result.url || result.reason || result.error);
+
+  const success = frameResults.find((result) => result.ok && result.operationName === "KAClassroom_GetActivitySessions");
+  if (success) {
+    return {
+      ...success,
+      frameResults
+    };
+  }
+
+  const usefulErrors = frameResults
+    .filter((result) => result.reason || result.error || result.status)
+    .map((result) => `Frame ${result.frameIndex}: ${result.reason || result.error || `HTTP ${result.status}`}`)
+    .slice(0, 5)
+    .join("; ");
+
+  throw new Error(usefulErrors || "Khan API capture did not return activity data. Make sure the current Khan tab is an Individual Student Report page.");
+}
+
+function buildApiCapture(tab, pageCapture, apiResult, startDate, endDate) {
+  const studentName = pageCapture?.studentSummary?.studentName || apiResult.studentName || apiResult.studentKaid || "";
+  const dateRange = `${startDate} - ${endDate}`;
+  const activityRows = (apiResult.sessions || []).map((session) => ({
+    dateText: formatActivityDate(session.eventTimestamp),
+    activity: compactText([session.itemTitle, session.itemSubtitle].filter(Boolean).join(" - ")) || session.contentKind || "Activity",
+    minutes: session.durationMinutes ?? "",
+    sourceText: `Khan API session ${session.id || ""}`.trim()
+  }));
+
+  return {
+    pageUrl: tab.url,
+    pageTitle: tab.title,
+    bestFrameUrl: apiResult.url || pageCapture?.bestFrameUrl || "",
+    bestFrameTitle: pageCapture?.bestFrameTitle || "",
+    pageKind: "individual-student-report-api",
+    dateRange,
+    expectedWeekStart: startDate,
+    expectedWeekEnd: endDate,
+    capturedAt: new Date().toISOString(),
+    studentSummary: {
+      studentName,
+      exerciseMinutes: apiResult.exerciseMinutes,
+      timeOnTaskMinutes: apiResult.timeOnTaskMinutes,
+      detectedDateRange: dateRange,
+      sourceText: "Khan GraphQL KAClassroom_GetActivitySessions"
+    },
+    rows: [],
+    activityRows,
+    frameReports: pageCapture?.frameReports || [],
+    structuredApi: {
+      operationName: apiResult.operationName,
+      requestUrl: apiResult.requestUrl,
+      studentKaid: apiResult.studentKaid,
+      startDate: apiResult.startDate,
+      endDate: apiResult.endDate,
+      status: apiResult.status,
+      exerciseMinutes: apiResult.exerciseMinutes,
+      timeOnTaskMinutes: apiResult.timeOnTaskMinutes,
+      sessionCount: activityRows.length,
+      frameResults: apiResult.frameResults
+    }
   };
 }
 
@@ -341,6 +455,7 @@ function formatDiagnostics(capture) {
     pageKind: capture.pageKind,
     detectedDateRange: capture.dateRange,
     studentSummary: capture.studentSummary || emptyStudentSummary(),
+    structuredApi: capture.structuredApi || null,
     rowCount: capture.rows.length,
     activityRowCount: capture.activityRows?.length || 0,
     activityRows: capture.activityRows || [],
@@ -468,6 +583,21 @@ function normalizeName(value) {
     .replace(/[^a-z0-9, ]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function compactText(value) {
+  return String(value || "").replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ").trim();
+}
+
+function formatActivityDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
 }
 
 function toDateInput(date) {
@@ -778,4 +908,166 @@ function collectKhanNetworkProbeFromPage() {
     installed: Boolean(probe?.installed),
     logs: probe?.logs || []
   };
+}
+
+async function requestKhanActivityFromPage(startDate, endDate) {
+  if (!/khanacademy\.org/i.test(location.hostname)) {
+    return { ok: false, reason: "not a Khan frame", url: location.href };
+  }
+
+  const studentKaid = getStudentKaidFromUrl(location.href);
+  if (!studentKaid) {
+    return {
+      ok: false,
+      reason: "student kaid not found in this frame URL",
+      url: location.href
+    };
+  }
+
+  const operationName = "KAClassroom_GetActivitySessions";
+  const query = `query KAClassroom_GetActivitySessions($studentKaid: String!, $startDate: Date, $endDate: Date, $activityKind: String, $after: ID, $pageSize: Int) {
+  user(kaid: $studentKaid) {
+    id
+    activityLogV2(
+      startDate: $startDate
+      endDate: $endDate
+      activityKind: $activityKind
+    ) {
+      time {
+        __typename
+        exerciseMinutes
+        totalMinutes
+      }
+      activitySessions(pageSize: $pageSize, after: $after) {
+        sessions {
+          id
+          itemTitle: title
+          itemSubtitle: subtitle
+          activityKind {
+            contentKind: id
+            __typename
+          }
+          durationMinutes
+          eventTimestamp
+          ... on MasteryActivitySession {
+            correctCount
+            problemCount
+            skillLevels {
+              id
+              after
+              __typename
+            }
+            __typename
+          }
+          __typename
+        }
+        pageInfo {
+          nextCursor
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+}`;
+
+  const requestUrl = new URL("https://classroom.khanacademy.org/api/internal/graphql/KAClassroom_GetActivitySessions");
+  requestUrl.searchParams.set("lang", "en");
+  requestUrl.searchParams.set("app", "classroom-teacher");
+  requestUrl.searchParams.set("_", String(Date.now()));
+
+  const body = JSON.stringify({
+    operationName,
+    query,
+    variables: {
+      studentKaid,
+      startDate,
+      endDate,
+      activityKind: null,
+      after: null,
+      pageSize: 50
+    }
+  });
+
+  try {
+    const response = await fetch(requestUrl.href, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "content-type": "application/json",
+        "x-ka-fkey": "1"
+      },
+      body
+    });
+    const responseText = await response.text();
+    const json = safeJsonParse(responseText);
+    const activityLog = json?.data?.user?.activityLogV2;
+    const sessions = activityLog?.activitySessions?.sessions || [];
+
+    if (!response.ok || !activityLog) {
+      return {
+        ok: false,
+        reason: json?.errors?.[0]?.message || "activityLogV2 missing from Khan response",
+        url: location.href,
+        requestUrl: requestUrl.href,
+        status: response.status,
+        responsePreview: truncateText(responseText, 3000)
+      };
+    }
+
+    return {
+      ok: true,
+      operationName,
+      url: location.href,
+      requestUrl: requestUrl.href,
+      status: response.status,
+      studentKaid,
+      startDate,
+      endDate,
+      exerciseMinutes: activityLog.time?.exerciseMinutes ?? null,
+      timeOnTaskMinutes: activityLog.time?.totalMinutes ?? null,
+      nextCursor: activityLog.activitySessions?.pageInfo?.nextCursor || null,
+      sessions: sessions.map((session) => ({
+        id: session.id || "",
+        itemTitle: session.itemTitle || "",
+        itemSubtitle: session.itemSubtitle || "",
+        contentKind: session.activityKind?.contentKind || "",
+        durationMinutes: session.durationMinutes ?? null,
+        eventTimestamp: session.eventTimestamp || "",
+        correctCount: session.correctCount ?? null,
+        problemCount: session.problemCount ?? null
+      }))
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "Khan API request failed",
+      error: error?.message || String(error),
+      url: location.href,
+      requestUrl: requestUrl.href,
+      studentKaid,
+      startDate,
+      endDate
+    };
+  }
+
+  function getStudentKaidFromUrl(url) {
+    const match = String(url || "").match(/individual-student\/(kaid_[A-Za-z0-9]+)/i);
+    return match ? match[1] : "";
+  }
+
+  function safeJsonParse(text) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+
+  function truncateText(text, maxLength) {
+    const value = String(text || "");
+    return value.length > maxLength ? `${value.slice(0, maxLength)}...[truncated ${value.length - maxLength} chars]` : value;
+  }
 }
