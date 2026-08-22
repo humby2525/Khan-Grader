@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.4.1";
+const BUILD_VERSION = "0.4.2";
 const STORAGE_KEY = "khanGrader.lastCapture";
 
 const elements = {};
@@ -39,6 +39,7 @@ async function startNetworkProbe() {
   }
 
   setStatus("Installing Khan network probe...");
+  const backgroundProbe = await chrome.runtime.sendMessage({ type: "KHAN_NETWORK_PROBE_START" });
   const results = await chrome.scripting.executeScript({
     target: { tabId: tab.id, allFrames: true },
     world: "MAIN",
@@ -46,7 +47,7 @@ async function startNetworkProbe() {
   });
 
   const installedFrames = results.filter((item) => item.result?.ok).length;
-  elements.networkProbe.textContent = `Network probe installed in ${installedFrames} Khan frame(s).\n\nNow go to the Khan tab, change the date filter, wait for the report to refresh, then click Collect Network Probe.`;
+  elements.networkProbe.textContent = `Network probe installed in ${installedFrames} Khan frame(s).\nChrome webRequest probe started: ${backgroundProbe?.startedAt || "unknown"}.\n\nNow go to the Khan tab, change the date filter, wait for the report to refresh, then click Collect Network Probe.`;
   elements.copyNetworkProbeButton.disabled = true;
   setStatus("Network probe started. Change the Khan date filter, then collect.");
 }
@@ -59,6 +60,7 @@ async function collectNetworkProbe() {
   }
 
   setStatus("Collecting Khan network probe...");
+  const backgroundProbe = await chrome.runtime.sendMessage({ type: "KHAN_NETWORK_PROBE_COLLECT" });
   const results = await chrome.scripting.executeScript({
     target: { tabId: tab.id, allFrames: true },
     world: "MAIN",
@@ -73,18 +75,33 @@ async function collectNetworkProbe() {
     }))
     .filter((frame) => frame.frameUrl || frame.logs.length);
 
-  const logs = frameLogs.flatMap((frame) => frame.logs.map((log) => ({
+  const pageLogs = frameLogs.flatMap((frame) => frame.logs.map((log) => ({
     frameIndex: frame.frameIndex,
     frameUrl: frame.frameUrl,
     ...log,
     analysis: analyzeNetworkLog(log)
   })));
 
+  const extensionLogs = (backgroundProbe?.logs || []).map((log) => ({
+    ...log,
+    frameIndex: log.frameId,
+    frameUrl: "",
+    analysis: analyzeNetworkLog(log)
+  }));
+
+  const logs = [...extensionLogs, ...pageLogs];
+
   lastNetworkProbe = {
     build: BUILD_VERSION,
     collectedAt: new Date().toISOString(),
     pageUrl: tab.url,
     pageTitle: tab.title,
+    backgroundProbe: {
+      active: Boolean(backgroundProbe?.active),
+      startedAt: backgroundProbe?.startedAt || "",
+      collectedAt: backgroundProbe?.collectedAt || "",
+      logCount: backgroundProbe?.logs?.length || 0
+    },
     totalLogs: logs.length,
     candidateLogs: logs.filter((log) => log.analysis.isCandidate),
     allLogs: logs
