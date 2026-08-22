@@ -38,13 +38,13 @@ function setDefaultWeek() {
 }
 
 async function captureCurrentTab() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id || !/khanacademy\.org/i.test(tab.url || "")) {
-    setError("Open the Khan Activity Report tab first, then come back here and capture.");
+  const tab = await findKhanTab();
+  if (!tab?.id) {
+    setError("Open the Khan Activity Report in this Chrome window, set the date range, then capture.");
     return;
   }
 
-  setStatus("Reading Khan report frames...");
+  setStatus(`Reading Khan report frames from ${tab.title || tab.url}...`);
 
   try {
     const capture = await readKhanTab(tab);
@@ -66,6 +66,20 @@ async function captureCurrentTab() {
   } catch (error) {
     setError(error.message || String(error));
   }
+}
+
+async function findKhanTab() {
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (isKhanTab(activeTab)) return activeTab;
+
+  const tabs = await chrome.tabs.query({ currentWindow: true });
+  return tabs
+    .filter(isKhanTab)
+    .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0] || null;
+}
+
+function isKhanTab(tab) {
+  return Boolean(tab?.id && /khanacademy\.org/i.test(tab.url || ""));
 }
 
 async function readKhanTab(tab) {
