@@ -62,7 +62,7 @@ Schoology writes are review-first. Capturing Khan data does not send anything to
    - Default required minutes
    - Max points
    - Assignment due date and due time
-   - Grading category ID and grading period ID, if your Schoology setup requires them
+   - Grading category name and grading period ID, if your Schoology setup requires them
 2. Enter the Schoology API base, consumer key, and consumer secret.
 3. Click **Save Settings**.
 4. Capture Khan rows with **Capture All Classes**.
@@ -91,12 +91,14 @@ Use **Find/Create Assignments** before the week starts if you want students to s
 2. Enter an assignment title template, such as `Khan Minutes - Week of {startDate}`.
 3. Enter a due date and due time. If due date is blank, the extension uses the selected week end date.
 4. Make sure each class has a Schoology section ID.
-5. Click **Load Grade Options** to fetch grading category and grading period IDs for the first saved section.
-6. Choose or enter the grading category ID and grading period ID.
+5. Click **Load Grade Options** to fetch grading category names and grading period IDs for the saved sections.
+6. Choose or enter the grading category name and grading period ID.
 7. Enter a grading task ID only if your district has given you one to test.
 8. Click **Find/Create Assignments**.
 
-The extension checks each section for an existing assignment with the exact same title. If it finds one, it reuses that assignment ID. If it does not find one, it creates a published, count-in-grade assignment using the max points, due date, due time, grading category, and grading period from the grading settings and saves the returned assignment ID into the class row. The assignment description tells students to spend the class goal minutes on Khan that week.
+The extension checks each section for an existing assignment with the exact same title. If it finds one, it reuses that assignment ID only when it also matches the selected assignment settings. If it does not find one, it creates a published, count-in-grade assignment using the max points, due date, due time, grading category, and grading period from the grading settings and saves the returned assignment ID into the class row. The assignment description tells students to spend the class goal minutes on Khan that week.
+
+Schoology category IDs can differ by section even when the visible category name is the same. For that reason, the normal workflow is to enter the category name, such as the same category you use in all three classes. The extension looks up that category separately in each section and sends the correct per-section category ID. The category ID fallback is only for one-section testing or unusual cases where you already know the ID is safe to reuse.
 
 After finding or creating each assignment, the extension fetches it back from Schoology and shows the published, available, count-in-grade, due date, category, period, points, and API self link in the assignment results table. If Schoology still returns an old matching title that is not usable, the extension marks it as skipped and creates a new assignment. If the Schoology page does not show the assignment, copy the Network Probe output after running **Find/Create Assignments**.
 

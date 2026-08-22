@@ -149,9 +149,13 @@
             <input id="assignmentDueTime" type="time" value="23:59">
           </label>
           <label>
-            Grading category ID
-            <input id="assignmentCategoryId" type="text" inputmode="numeric" list="assignmentCategoryOptions" placeholder="Schoology default">
+            Grading category
+            <input id="assignmentCategoryName" type="text" list="assignmentCategoryOptions" placeholder="Schoology default">
             <datalist id="assignmentCategoryOptions"></datalist>
+          </label>
+          <label>
+            Category ID fallback
+            <input id="assignmentCategoryId" type="text" inputmode="numeric" placeholder="Only if category is blank">
           </label>
           <label>
             Grading period ID
