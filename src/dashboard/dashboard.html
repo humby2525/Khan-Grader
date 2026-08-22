@@ -13,7 +13,7 @@
           <h1>Khan Grader</h1>
           <p>Capture Khan Academy Individual Student Report minutes.</p>
         </div>
-        <span id="build">v0.3.1</span>
+        <span id="build">v0.4.0</span>
       </header>
 
       <section class="panel controls">
@@ -26,6 +26,8 @@
           <input id="weekEnd" type="date">
         </label>
         <button id="captureButton" type="button">Capture Current Student</button>
+        <button id="startNetworkProbeButton" class="secondary" type="button">Start Network Probe</button>
+        <button id="collectNetworkProbeButton" class="secondary" type="button">Collect Network Probe</button>
         <button id="openKhanButton" class="secondary" type="button">Open Khan Reports</button>
       </section>
 
@@ -82,6 +84,14 @@
           <button id="copyDiagnosticsButton" class="secondary" type="button" disabled>Copy Diagnostics</button>
         </div>
         <pre id="diagnostics">No diagnostics yet.</pre>
+      </section>
+
+      <section class="panel">
+        <div class="section-header">
+          <h2>Network Probe</h2>
+          <button id="copyNetworkProbeButton" class="secondary" type="button" disabled>Copy Network Probe</button>
+        </div>
+        <pre id="networkProbe">No network probe collected yet.</pre>
       </section>
     </main>
     <script src="dashboard.js"></script>

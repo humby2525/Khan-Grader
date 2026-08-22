@@ -1,8 +1,9 @@
-const BUILD_VERSION = "0.3.1";
+const BUILD_VERSION = "0.4.0";
 const STORAGE_KEY = "khanGrader.lastCapture";
 
 const elements = {};
 let lastCapture = null;
+let lastNetworkProbe = null;
 
 document.addEventListener("DOMContentLoaded", init);
 
@@ -13,9 +14,12 @@ async function init() {
 
   elements.build.textContent = `v${BUILD_VERSION}`;
   elements.captureButton.addEventListener("click", captureCurrentTab);
+  elements.startNetworkProbeButton.addEventListener("click", startNetworkProbe);
+  elements.collectNetworkProbeButton.addEventListener("click", collectNetworkProbe);
   elements.openKhanButton.addEventListener("click", () => chrome.tabs.create({ url: "https://classroom.khanacademy.org/" }));
   elements.downloadButton.addEventListener("click", downloadCsv);
   elements.copyDiagnosticsButton.addEventListener("click", copyDiagnostics);
+  elements.copyNetworkProbeButton.addEventListener("click", copyNetworkProbe);
 
   setDefaultWeek();
 
@@ -25,6 +29,72 @@ async function init() {
     renderCapture(lastCapture);
     setStatus("Loaded previous capture.");
   }
+}
+
+async function startNetworkProbe() {
+  const tab = await findKhanTab();
+  if (!tab?.id) {
+    setError("Open the Khan Individual Student Report tab before starting the network probe.");
+    return;
+  }
+
+  setStatus("Installing Khan network probe...");
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id, allFrames: true },
+    world: "MAIN",
+    func: installKhanNetworkProbeInPage
+  });
+
+  const installedFrames = results.filter((item) => item.result?.ok).length;
+  elements.networkProbe.textContent = `Network probe installed in ${installedFrames} Khan frame(s).\n\nNow go to the Khan tab, change the date filter, wait for the report to refresh, then click Collect Network Probe.`;
+  elements.copyNetworkProbeButton.disabled = true;
+  setStatus("Network probe started. Change the Khan date filter, then collect.");
+}
+
+async function collectNetworkProbe() {
+  const tab = await findKhanTab();
+  if (!tab?.id) {
+    setError("Open the Khan Individual Student Report tab before collecting the network probe.");
+    return;
+  }
+
+  setStatus("Collecting Khan network probe...");
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id, allFrames: true },
+    world: "MAIN",
+    func: collectKhanNetworkProbeFromPage
+  });
+
+  const frameLogs = results
+    .map((item, index) => ({
+      frameIndex: index + 1,
+      frameUrl: item.result?.url || "",
+      logs: item.result?.logs || []
+    }))
+    .filter((frame) => frame.frameUrl || frame.logs.length);
+
+  const logs = frameLogs.flatMap((frame) => frame.logs.map((log) => ({
+    frameIndex: frame.frameIndex,
+    frameUrl: frame.frameUrl,
+    ...log,
+    analysis: analyzeNetworkLog(log)
+  })));
+
+  lastNetworkProbe = {
+    build: BUILD_VERSION,
+    collectedAt: new Date().toISOString(),
+    pageUrl: tab.url,
+    pageTitle: tab.title,
+    totalLogs: logs.length,
+    candidateLogs: logs.filter((log) => log.analysis.isCandidate),
+    allLogs: logs
+  };
+
+  elements.networkProbe.textContent = JSON.stringify(lastNetworkProbe, null, 2);
+  elements.copyNetworkProbeButton.disabled = false;
+
+  const withDates = lastNetworkProbe.candidateLogs.filter((log) => log.analysis.dateHints.length);
+  setStatus(`Collected ${logs.length} network log(s), ${lastNetworkProbe.candidateLogs.length} likely Khan report candidate(s), ${withDates.length} with date hints.`);
 }
 
 function setDefaultWeek() {
@@ -268,6 +338,12 @@ async function copyDiagnostics() {
   setStatus("Diagnostics copied.");
 }
 
+async function copyNetworkProbe() {
+  if (!lastNetworkProbe) return;
+  await navigator.clipboard.writeText(JSON.stringify(lastNetworkProbe, null, 2));
+  setStatus("Network probe copied.");
+}
+
 function downloadCsv() {
   if (!lastCapture) return;
 
@@ -402,4 +478,256 @@ function setStatus(message) {
 function setError(message) {
   elements.status.className = "status error";
   elements.status.textContent = message;
+}
+
+function analyzeNetworkLog(log) {
+  const haystack = [
+    log.url,
+    log.requestBodyPreview,
+    log.responseBodyPreview,
+    JSON.stringify(log.requestJsonShape || {}),
+    JSON.stringify(log.responseJsonShape || {})
+  ].join("\n");
+
+  const dateHints = findDateHints(haystack);
+  const metricHints = findMetricHints(haystack);
+  const reportHints = findReportHints(haystack);
+  const isCandidate = /graphql|api|report|activity|progress|student|learner/i.test(haystack) || dateHints.length > 0 || metricHints.length > 0;
+
+  return {
+    isCandidate,
+    dateHints,
+    metricHints,
+    reportHints
+  };
+}
+
+function findDateHints(text) {
+  return uniqueStrings([
+    ...String(text || "").matchAll(/\b(?:startDate|endDate|start_date|end_date|from|to|begin|until|dateRange|date_range|period)\b.{0,80}/gi)
+  ].map((match) => match[0]).concat([
+    ...String(text || "").matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)
+  ].map((match) => match[0])).concat([
+    ...String(text || "").matchAll(/\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/g)
+  ].map((match) => match[0]))).slice(0, 40);
+}
+
+function findMetricHints(text) {
+  return uniqueStrings([...String(text || "").matchAll(/\b(?:exercise|time.?on.?task|minute|duration|active|activity|skill|course|score)\b.{0,80}/gi)]
+    .map((match) => match[0]))
+    .slice(0, 40);
+}
+
+function findReportHints(text) {
+  return uniqueStrings([...String(text || "").matchAll(/\b(?:IndividualStudent|individual.?student|activity.?log|student.?report|teacher|class|kaid|learner)\b.{0,80}/gi)]
+    .map((match) => match[0]))
+    .slice(0, 40);
+}
+
+function uniqueStrings(values) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values.map((item) => String(item || "").trim()).filter(Boolean)) {
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+  }
+  return result;
+}
+
+function installKhanNetworkProbeInPage() {
+  if (!/khanacademy\.org/i.test(location.hostname)) {
+    return { ok: false, reason: "not a Khan frame", url: location.href };
+  }
+
+  if (window.__KHAN_GRADER_NETWORK_PROBE__?.installed) {
+    window.__KHAN_GRADER_NETWORK_PROBE__.logs = [];
+    return { ok: true, reinstalled: false, url: location.href };
+  }
+
+  const probe = {
+    installed: true,
+    logs: [],
+    maxLogs: 80,
+    originalFetch: window.fetch,
+    originalXhrOpen: XMLHttpRequest.prototype.open,
+    originalXhrSend: XMLHttpRequest.prototype.send
+  };
+
+  window.__KHAN_GRADER_NETWORK_PROBE__ = probe;
+
+  window.fetch = async function khanGraderFetchProbe(input, init = {}) {
+    const request = normalizeFetchRequest(input, init);
+    const record = startProbeRecord("fetch", request.url, request.method, request.body);
+
+    try {
+      const response = await probe.originalFetch.apply(this, arguments);
+      record.status = response.status;
+      record.contentType = response.headers.get("content-type") || "";
+      captureResponsePreview(record, response);
+      return response;
+    } catch (error) {
+      record.error = error?.message || String(error);
+      throw error;
+    }
+  };
+
+  XMLHttpRequest.prototype.open = function khanGraderXhrOpenProbe(method, url) {
+    this.__khanGraderProbe = {
+      method: method || "GET",
+      url: absoluteUrl(url)
+    };
+    return probe.originalXhrOpen.apply(this, arguments);
+  };
+
+  XMLHttpRequest.prototype.send = function khanGraderXhrSendProbe(body) {
+    const info = this.__khanGraderProbe || {};
+    const record = startProbeRecord("xhr", info.url || "", info.method || "GET", body);
+
+    this.addEventListener("loadend", () => {
+      record.status = this.status;
+      record.contentType = this.getResponseHeader("content-type") || "";
+      if (/json|graphql|text/i.test(record.contentType || "")) {
+        record.responseBodyPreview = truncateText(this.responseText || "", 12000);
+        record.responseJsonShape = parseJsonShape(record.responseBodyPreview);
+      }
+      record.completedAt = new Date().toISOString();
+    });
+
+    return probe.originalXhrSend.apply(this, arguments);
+  };
+
+  return { ok: true, reinstalled: true, url: location.href };
+
+  function startProbeRecord(type, url, method, body) {
+    const record = {
+      type,
+      startedAt: new Date().toISOString(),
+      url: absoluteUrl(url),
+      method: method || "GET",
+      requestBodyPreview: serializeBody(body),
+      requestJsonShape: parseJsonShape(serializeBody(body)),
+      status: null,
+      contentType: "",
+      responseBodyPreview: "",
+      responseJsonShape: null,
+      completedAt: ""
+    };
+
+    if (/khanacademy\.org/i.test(record.url)) {
+      probe.logs.push(record);
+      if (probe.logs.length > probe.maxLogs) probe.logs.shift();
+    }
+
+    return record;
+  }
+
+  function normalizeFetchRequest(input, init) {
+    if (input instanceof Request) {
+      return {
+        url: input.url,
+        method: init.method || input.method || "GET",
+        body: init.body || null
+      };
+    }
+    return {
+      url: String(input || ""),
+      method: init.method || "GET",
+      body: init.body || null
+    };
+  }
+
+  function captureResponsePreview(record, response) {
+    const contentType = record.contentType || "";
+    if (!/json|graphql|text/i.test(contentType)) return;
+
+    response.clone().text()
+      .then((text) => {
+        record.responseBodyPreview = truncateText(text, 12000);
+        record.responseJsonShape = parseJsonShape(record.responseBodyPreview);
+        record.completedAt = new Date().toISOString();
+      })
+      .catch((error) => {
+        record.responseReadError = error?.message || String(error);
+      });
+  }
+
+  function absoluteUrl(url) {
+    try {
+      return new URL(url, location.href).href;
+    } catch {
+      return String(url || "");
+    }
+  }
+
+  function serializeBody(body) {
+    if (body === null || body === undefined) return "";
+    if (typeof body === "string") return truncateText(body, 12000);
+    if (body instanceof URLSearchParams) return truncateText(body.toString(), 12000);
+    if (body instanceof FormData) {
+      return truncateText(JSON.stringify(Array.from(body.entries())), 12000);
+    }
+    if (body instanceof Blob) return `[Blob ${body.type || "unknown"} ${body.size} bytes]`;
+    if (body instanceof ArrayBuffer) return `[ArrayBuffer ${body.byteLength} bytes]`;
+    try {
+      return truncateText(JSON.stringify(body), 12000);
+    } catch {
+      return truncateText(String(body), 12000);
+    }
+  }
+
+  function parseJsonShape(text) {
+    try {
+      return summarizeJson(JSON.parse(text));
+    } catch {
+      return null;
+    }
+  }
+
+  function summarizeJson(value) {
+    const paths = [];
+    const sample = {};
+    walk(value, "$", 0);
+    return { paths: paths.slice(0, 120), sample };
+
+    function walk(current, currentPath, depth) {
+      if (depth > 7 || paths.length > 180) return;
+      if (Array.isArray(current)) {
+        paths.push(`${currentPath}[] length=${current.length}`);
+        current.slice(0, 8).forEach((item, index) => walk(item, `${currentPath}[${index}]`, depth + 1));
+        return;
+      }
+      if (!current || typeof current !== "object") return;
+
+      for (const [key, child] of Object.entries(current)) {
+        const childPath = `${currentPath}.${key}`;
+        if (/date|time|minute|duration|exercise|activity|student|learner|kaid|course|skill|score|total|report/i.test(key)) {
+          paths.push(childPath);
+          if (Object.keys(sample).length < 30) sample[childPath] = summarizeValue(child);
+        }
+        walk(child, childPath, depth + 1);
+      }
+    }
+  }
+
+  function summarizeValue(value) {
+    if (Array.isArray(value)) return `[array length ${value.length}]`;
+    if (value && typeof value === "object") return `{${Object.keys(value).slice(0, 10).join(", ")}}`;
+    return value;
+  }
+
+  function truncateText(text, maxLength) {
+    const value = String(text || "");
+    return value.length > maxLength ? `${value.slice(0, maxLength)}…[truncated ${value.length - maxLength} chars]` : value;
+  }
+}
+
+function collectKhanNetworkProbeFromPage() {
+  const probe = window.__KHAN_GRADER_NETWORK_PROBE__;
+  return {
+    url: location.href,
+    installed: Boolean(probe?.installed),
+    logs: probe?.logs || []
+  };
 }
