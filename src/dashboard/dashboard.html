@@ -16,31 +16,44 @@
         <span id="build">v0.10.3</span>
       </header>
 
-      <section class="panel controls">
-        <label>
-          Expected week start
-          <input id="weekStart" type="date">
-        </label>
-        <label>
-          Expected week end
-          <input id="weekEnd" type="date">
-        </label>
-        <button id="captureApiButton" type="button">Capture via Khan API</button>
-        <button id="captureClassApiButton" type="button">Capture Class via Khan API</button>
-        <button id="captureButton" type="button">Capture Current Student</button>
-        <button id="startNetworkProbeButton" class="secondary" type="button">Start Network Probe</button>
-        <button id="collectNetworkProbeButton" class="secondary" type="button">Collect Network Probe</button>
-        <button id="openKhanButton" class="secondary" type="button">Open Khan Reports</button>
+      <section class="panel">
+        <div class="section-header">
+          <h2>Weekly Workflow</h2>
+        </div>
+        <div class="workflow-grid">
+          <label>
+            Week start
+            <input id="weekStart" type="date">
+          </label>
+          <label>
+            Week end
+            <input id="weekEnd" type="date">
+          </label>
+          <button id="captureAllClassesButton" type="button">Capture All Classes</button>
+          <button id="prepareAssignmentsButton" type="button">Find/Create Assignments</button>
+          <button id="previewSchoologyButton" type="button">Preview Grades</button>
+          <button id="sendSchoologyButton" type="button">Send Grades</button>
+        </div>
+        <details class="advanced-options compact">
+          <summary>Khan tools</summary>
+          <div class="button-row">
+            <button id="openKhanButton" class="secondary" type="button">Open Khan Reports</button>
+            <button id="captureClassApiButton" class="secondary" type="button">Capture Current Khan Class</button>
+            <button id="captureApiButton" class="secondary" type="button">Capture Current Khan Student API</button>
+            <button id="captureButton" class="secondary" type="button">Capture Current Student Page</button>
+            <button id="startNetworkProbeButton" class="secondary" type="button">Start Network Probe</button>
+            <button id="collectNetworkProbeButton" class="secondary" type="button">Collect Network Probe</button>
+          </div>
+        </details>
       </section>
 
-      <p id="status" class="status">For a class, open the Khan Roster page, choose dates here, then click Capture Class via Khan API. For one student, open their Individual Student Report.</p>
+      <p id="status" class="status">Choose the week, confirm your saved classes, then use the Weekly Workflow buttons from left to right.</p>
 
       <section class="panel">
         <div class="section-header">
           <h2>Saved Classes</h2>
           <div class="button-row">
             <button id="saveClassesButton" class="secondary" type="button">Save Classes</button>
-            <button id="captureAllClassesButton" type="button">Capture All Classes</button>
           </div>
         </div>
         <div class="class-grid header">
@@ -49,6 +62,7 @@
           <div>Goal minutes</div>
           <div>Schoology section ID</div>
           <div>Schoology assignment ID</div>
+          <div>Task ID</div>
         </div>
         <div class="class-grid">
           <input id="className1" type="text" placeholder="Class 1 name">
@@ -56,6 +70,7 @@
           <input id="classTargetMinutes1" type="number" min="1" step="1" placeholder="Default">
           <input id="classSectionId1" type="text" inputmode="numeric" placeholder="Section ID">
           <input id="classAssignmentId1" type="text" inputmode="numeric" placeholder="Assignment ID">
+          <input id="classGradingTaskId1" type="text" inputmode="numeric" placeholder="Optional">
         </div>
         <div class="class-grid">
           <input id="className2" type="text" placeholder="Class 2 name">
@@ -63,6 +78,7 @@
           <input id="classTargetMinutes2" type="number" min="1" step="1" placeholder="Default">
           <input id="classSectionId2" type="text" inputmode="numeric" placeholder="Section ID">
           <input id="classAssignmentId2" type="text" inputmode="numeric" placeholder="Assignment ID">
+          <input id="classGradingTaskId2" type="text" inputmode="numeric" placeholder="Optional">
         </div>
         <div class="class-grid">
           <input id="className3" type="text" placeholder="Class 3 name">
@@ -70,6 +86,7 @@
           <input id="classTargetMinutes3" type="number" min="1" step="1" placeholder="Default">
           <input id="classSectionId3" type="text" inputmode="numeric" placeholder="Section ID">
           <input id="classAssignmentId3" type="text" inputmode="numeric" placeholder="Assignment ID">
+          <input id="classGradingTaskId3" type="text" inputmode="numeric" placeholder="Optional">
         </div>
       </section>
 
@@ -111,10 +128,7 @@
             <button id="saveSchoologyButton" class="secondary" type="button">Save Settings</button>
             <button id="loadSchoologyOptionsButton" class="secondary" type="button">Load Grade Options</button>
             <button id="readSchoologyPageOptionsButton" class="secondary" type="button">Read Schoology Page Dropdowns</button>
-            <button id="prepareAssignmentsButton" class="secondary" type="button">Find/Create Assignments</button>
-            <button id="previewSchoologyButton" type="button">Preview Schoology Grades</button>
             <button id="previewSchoologyTestButton" class="secondary" type="button">Preview Test Grades</button>
-            <button id="sendSchoologyButton" type="button">Send Grades to Schoology</button>
           </div>
         </div>
         <div class="schoology-grid">
@@ -201,35 +215,40 @@
         <div id="schoologyPreviewTable" class="table empty">No Schoology grade preview yet.</div>
       </section>
 
-      <section class="panel">
-        <div class="section-header">
-          <h2>Activity Details</h2>
-        </div>
-        <div id="activityTable" class="table empty">No activity details captured yet.</div>
-      </section>
+      <details class="panel diagnostics-panel">
+        <summary>Diagnostics and raw data</summary>
+        <div class="diagnostics-stack">
+          <section>
+            <div class="section-header">
+              <h2>Activity Details</h2>
+            </div>
+            <div id="activityTable" class="table empty">No activity details captured yet.</div>
+          </section>
 
-      <section class="panel">
-        <div class="section-header">
-          <h2>Fallback Total Rows</h2>
-        </div>
-        <div id="table" class="table empty">No fallback total rows captured yet.</div>
-      </section>
+          <section>
+            <div class="section-header">
+              <h2>Fallback Total Rows</h2>
+            </div>
+            <div id="table" class="table empty">No fallback total rows captured yet.</div>
+          </section>
 
-      <section class="panel">
-        <div class="section-header">
-          <h2>Diagnostics</h2>
-          <button id="copyDiagnosticsButton" class="secondary" type="button" disabled>Copy Diagnostics</button>
-        </div>
-        <pre id="diagnostics">No diagnostics yet.</pre>
-      </section>
+          <section>
+            <div class="section-header">
+              <h2>Diagnostics</h2>
+              <button id="copyDiagnosticsButton" class="secondary" type="button" disabled>Copy Diagnostics</button>
+            </div>
+            <pre id="diagnostics">No diagnostics yet.</pre>
+          </section>
 
-      <section class="panel">
-        <div class="section-header">
-          <h2>Network Probe</h2>
-          <button id="copyNetworkProbeButton" class="secondary" type="button" disabled>Copy Network Probe</button>
+          <section>
+            <div class="section-header">
+              <h2>Network Probe</h2>
+              <button id="copyNetworkProbeButton" class="secondary" type="button" disabled>Copy Network Probe</button>
+            </div>
+            <pre id="networkProbe">No network probe collected yet.</pre>
+          </section>
         </div>
-        <pre id="networkProbe">No network probe collected yet.</pre>
-      </section>
+      </details>
     </main>
     <script src="dashboard.js"></script>
   </body>

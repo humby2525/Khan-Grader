@@ -94,7 +94,7 @@ Use **Find/Create Assignments** before the week starts if you want students to s
 5. Click **Load Grade Options** to fill the category and grading period dropdowns from the Schoology API.
 6. If the grading task dropdown is empty, open a Schoology assignment create or edit page in another tab and click **Read Schoology Page Dropdowns**. The extension reads the visible Schoology form dropdowns from that signed-in page.
 7. Choose the grading category, grading task, and grading period from the dropdowns.
-8. Use **Advanced Schoology IDs** only if Schoology does not return one of the dropdown options but you know the correct ID.
+8. If Schoology task IDs differ by class, open an assignment create/edit page for each class and click **Read Schoology Page Dropdowns**. When the page URL includes the matching section ID, the extension saves that class's task ID in the Saved Classes row.
 9. Click **Find/Create Assignments**.
 
 The extension checks each section for an existing assignment with the exact same title. If it finds one, it reuses that assignment ID only when it also matches the selected assignment settings. If it does not find one, it creates a published, count-in-grade assignment using the max points, due date, due time, grading category, and grading period from the grading settings and saves the returned assignment ID into the class row. The assignment description tells students to spend the class goal minutes on Khan that week.

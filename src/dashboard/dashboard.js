@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.12.1";
+const BUILD_VERSION = "0.13.0";
 const DEFAULT_ASSIGNMENT_TITLE_TEMPLATE = "Khan Minutes - Week of {startDate}";
 const LEGACY_ASSIGNMENT_TITLE_TEMPLATE = "Khan Active Minutes - Week of {startDate}";
 const STORAGE_KEY = "khanGrader.lastCapture";
@@ -37,7 +37,6 @@ async function init() {
   elements.copyDiagnosticsButton.addEventListener("click", copyDiagnostics);
   elements.copyNetworkProbeButton.addEventListener("click", copyNetworkProbe);
   elements.assignmentPeriodName.addEventListener("change", () => syncSelectFallbackId(elements.assignmentPeriodName, elements.assignmentPeriodId));
-  elements.assignmentGradingTaskName.addEventListener("change", () => syncSelectFallbackId(elements.assignmentGradingTaskName, elements.assignmentGradingTaskId));
 
   setDefaultWeek();
 
@@ -59,6 +58,7 @@ function loadClassConfigs(configs) {
     elements[`classTargetMinutes${index + 1}`].value = config.targetMinutes || "";
     elements[`classSectionId${index + 1}`].value = config.schoologySectionId || "";
     elements[`classAssignmentId${index + 1}`].value = config.schoologyAssignmentId || "";
+    elements[`classGradingTaskId${index + 1}`].value = config.schoologyGradingTaskId || "";
   }
 }
 
@@ -71,13 +71,15 @@ function readClassConfigs() {
     const targetMinutes = targetMinutesText ? Number(targetMinutesText) : null;
     const schoologySectionId = compactText(elements[`classSectionId${index}`].value);
     const schoologyAssignmentId = compactText(elements[`classAssignmentId${index}`].value);
-    if (!name && !url && !targetMinutesText && !schoologySectionId && !schoologyAssignmentId) continue;
+    const schoologyGradingTaskId = compactText(elements[`classGradingTaskId${index}`].value);
+    if (!name && !url && !targetMinutesText && !schoologySectionId && !schoologyAssignmentId && !schoologyGradingTaskId) continue;
     configs.push({
       name: name || `Class ${index}`,
       url,
       targetMinutes,
       schoologySectionId,
-      schoologyAssignmentId
+      schoologyAssignmentId,
+      schoologyGradingTaskId
     });
   }
   return configs;
@@ -260,18 +262,22 @@ async function readSchoologyPageDropdowns() {
     applySchoologyPageSelectedOption(elements.assignmentPeriodName, pageOptions.controls.period);
     applySchoologyPageSelectedOption(elements.assignmentGradingTaskName, pageOptions.controls.gradingTask);
     syncSelectFallbackId(elements.assignmentPeriodName, elements.assignmentPeriodId);
-    syncSelectFallbackId(elements.assignmentGradingTaskName, elements.assignmentGradingTaskId);
+    const classTaskUpdate = applySchoologyPageTaskIdToClassRow(tab.url || pageOptions.pageUrl, pageOptions.controls.gradingTask);
+    if (classTaskUpdate) {
+      await chrome.storage.local.set({ [CLASS_CONFIG_STORAGE_KEY]: readClassConfigs() });
+    }
 
     lastNetworkProbe = {
       build: BUILD_VERSION,
       type: "schoology-page-dropdowns",
       tabId: tab.id,
       tabUrl: tab.url || "",
+      classTaskUpdate,
       ...pageOptions
     };
     elements.networkProbe.textContent = JSON.stringify(lastNetworkProbe, null, 2);
     elements.copyNetworkProbeButton.disabled = false;
-    setStatus(`Read ${categoryRows.length} categor${categoryRows.length === 1 ? "y" : "ies"}, ${taskRows.length} grading task${taskRows.length === 1 ? "" : "s"}, and ${periodRows.length} period${periodRows.length === 1 ? "" : "s"} from the Schoology page.`);
+    setStatus(`Read ${categoryRows.length} categor${categoryRows.length === 1 ? "y" : "ies"}, ${taskRows.length} grading task${taskRows.length === 1 ? "" : "s"}, and ${periodRows.length} period${periodRows.length === 1 ? "" : "s"} from the Schoology page.${classTaskUpdate ? ` Saved task ID ${classTaskUpdate.taskId} for ${classTaskUpdate.className}.` : ""}`);
   } catch (error) {
     setError(`Could not read the Schoology page dropdowns: ${error.message || String(error)}`);
   } finally {
@@ -1631,18 +1637,18 @@ async function resolveSchoologyPeriodId(classConfig, schoologyConfig) {
 
 async function resolveSchoologyGradingTaskId(classConfig, schoologyConfig) {
   const taskName = compactText(schoologyConfig.assignmentGradingTaskName);
-  if (!taskName) return compactText(schoologyConfig.assignmentGradingTaskId);
+  if (!taskName) return compactText(classConfig.schoologyGradingTaskId || schoologyConfig.assignmentGradingTaskId);
 
   try {
     const tasks = await fetchSchoologyGradingTasks(classConfig.schoologySectionId, schoologyConfig);
     const match = findSchoologyOptionByTitle(tasks, taskName);
     if (match?.id) return String(match.id);
-    const fallbackId = compactText(schoologyConfig.assignmentGradingTaskId);
+    const fallbackId = compactText(classConfig.schoologyGradingTaskId || schoologyConfig.assignmentGradingTaskId);
     if (fallbackId) return fallbackId;
     const available = formatAvailableSchoologyOptionTitles(tasks);
     throw new Error(`Could not find grading task "${taskName}" for ${classConfig.name || `section ${classConfig.schoologySectionId}`}.${available ? ` Available tasks: ${available}` : ""}`);
   } catch (error) {
-    const fallbackId = compactText(schoologyConfig.assignmentGradingTaskId);
+    const fallbackId = compactText(classConfig.schoologyGradingTaskId || schoologyConfig.assignmentGradingTaskId);
     if (fallbackId) return fallbackId;
     throw error;
   }
@@ -2068,6 +2074,38 @@ function isPlaceholderSchoologyOption(option) {
     || /^-+$/.test(title);
 }
 
+function applySchoologyPageTaskIdToClassRow(pageUrl, gradingTaskControl) {
+  const sectionId = parseSchoologySectionIdFromUrl(pageUrl);
+  const selected = (gradingTaskControl?.options || [])
+    .find((option) => option.selected && compactText(option.id) && compactText(option.title));
+  if (!sectionId || !selected) return null;
+
+  for (let index = 1; index <= 3; index += 1) {
+    if (compactText(elements[`classSectionId${index}`].value) !== sectionId) continue;
+    elements[`classGradingTaskId${index}`].value = compactText(selected.id);
+    return {
+      sectionId,
+      className: compactText(elements[`className${index}`].value) || `Class ${index}`,
+      taskId: compactText(selected.id),
+      taskName: compactText(selected.title)
+    };
+  }
+  return null;
+}
+
+function parseSchoologySectionIdFromUrl(pageUrl) {
+  const text = String(pageUrl || "");
+  const patterns = [
+    /\/(?:course|courses|section|sections)\/(\d+)(?:[/?#]|$)/i,
+    /[?&](?:section_id|sectionId|realm_id)=(\d+)(?:&|$)/i
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return "";
+}
+
 function populateSchoologyNameSelect(select, rows, defaultLabel, emptyLabel) {
   const previousValue = compactText(select.value);
   select.innerHTML = "";
@@ -2229,7 +2267,9 @@ function isValidDateInput(value) {
 
 function validateClassTargetMinutes(configs) {
   const invalidTarget = configs.find((config) => config.targetMinutes !== null && (!Number.isFinite(config.targetMinutes) || config.targetMinutes <= 0));
-  return invalidTarget ? `Check the goal minutes for ${invalidTarget.name}. It should be blank or greater than zero.` : "";
+  if (invalidTarget) return `Check the goal minutes for ${invalidTarget.name}. It should be blank or greater than zero.`;
+  const invalidTaskId = configs.find((config) => config.schoologyGradingTaskId && !/^[A-Za-z0-9_-]+$/.test(config.schoologyGradingTaskId));
+  return invalidTaskId ? `Check the task ID for ${invalidTaskId.name}. It should be blank or an ID value.` : "";
 }
 
 function renderSchoologyPreview(preview) {

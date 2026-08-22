@@ -96,11 +96,16 @@ h2 {
   padding: 18px;
 }
 
-.controls {
+.controls,
+.workflow-grid {
   align-items: end;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 14px;
+}
+
+.workflow-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 label {
@@ -123,7 +128,7 @@ select {
 .class-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(130px, 0.8fr) minmax(240px, 1.5fr) minmax(110px, 0.6fr) minmax(130px, 0.7fr) minmax(140px, 0.7fr);
+  grid-template-columns: minmax(120px, 0.8fr) minmax(220px, 1.5fr) minmax(95px, 0.55fr) minmax(115px, 0.65fr) minmax(125px, 0.7fr) minmax(95px, 0.5fr);
   margin-top: 10px;
 }
 
@@ -140,12 +145,29 @@ select {
   padding-top: 12px;
 }
 
+.advanced-options.compact {
+  margin-bottom: 0;
+  margin-top: 14px;
+}
+
 .advanced-options summary {
   color: #52616b;
   cursor: pointer;
   font-size: 13px;
   font-weight: 700;
   margin-bottom: 12px;
+}
+
+.diagnostics-panel > summary {
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.diagnostics-stack {
+  display: grid;
+  gap: 18px;
+  margin-top: 16px;
 }
 
 .class-grid.header {
