@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.6.1";
+const BUILD_VERSION = "0.7.0";
 const STORAGE_KEY = "khanGrader.lastCapture";
 
 const elements = {};
@@ -220,13 +220,41 @@ async function captureClassViaApi() {
 
   try {
     const rosterResult = await collectKhanRoster(tab);
-    if (!rosterResult.students.length) {
+    if (rosterResult.students.length <= 1) {
       renderRosterDiagnostics(rosterResult);
-      throw new Error("No students with Khan IDs were found. Open the Individual Student Report, click Switch student once, then try again.");
-    }
-    if (rosterResult.students.length === 1) {
-      renderRosterDiagnostics(rosterResult);
-      throw new Error("Only the current student was found. Open the Khan Switch student menu so the full roster is visible, then run Capture Class via Khan API again.");
+      setStatus("Student IDs were not exposed directly. Trying Switch-student navigation capture...");
+      const switchResult = await captureKhanClassBySwitching(tab, startDate, endDate);
+      if (!switchResult.results.filter((result) => result.ok).length || switchResult.results.length <= 1) {
+        lastNetworkProbe = {
+          build: BUILD_VERSION,
+          type: "khan-switch-student-capture",
+          collectedAt: new Date().toISOString(),
+          rosterDiscovery: rosterResult,
+          switchCapture: switchResult
+        };
+        elements.networkProbe.textContent = JSON.stringify(lastNetworkProbe, null, 2);
+        elements.copyNetworkProbeButton.disabled = false;
+        throw new Error("The Switch-student navigation fallback still did not find the class roster. Copy Network Probe and paste it here.");
+      }
+
+      const switchRoster = {
+        ...rosterResult,
+        students: switchResult.results.map((result) => ({
+          kaid: result.studentKaid,
+          name: result.studentName || result.studentKaid,
+          source: "switch-student-navigation"
+        })),
+        switchCapture: switchResult
+      };
+      lastCapture = buildClassApiCapture(tab, switchRoster, switchResult, startDate, endDate);
+
+      await chrome.storage.local.set({ [STORAGE_KEY]: lastCapture });
+      renderCapture(lastCapture);
+
+      const failedCount = lastCapture.studentSummaries.filter((student) => student.error).length;
+      const status = `Captured ${lastCapture.studentSummaries.length} student(s) by switching Khan students`;
+      setStatus(failedCount ? `${status}; ${failedCount} had errors. Copy Diagnostics for details.` : `${status}.`);
+      return;
     }
 
     setStatus(`Found ${rosterResult.students.length} student(s). Requesting Khan minutes for ${startDate} through ${endDate}...`);
@@ -372,6 +400,24 @@ async function requestKhanActivitiesForRoster(tab, students, startDate, endDate)
   }
   if (!result.ok) {
     throw new Error(result.error || result.reason || "Khan class API capture failed.");
+  }
+  return result;
+}
+
+async function captureKhanClassBySwitching(tab, startDate, endDate) {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    world: "MAIN",
+    func: captureKhanClassBySwitchingStudentsFromPage,
+    args: [startDate, endDate]
+  });
+
+  const result = results.find((item) => item.result?.ok || item.result?.results || item.result?.error)?.result;
+  if (!result) {
+    throw new Error("Khan Switch-student capture did not return a result from the current tab.");
+  }
+  if (!result.ok) {
+    throw new Error(result.error || result.reason || "Khan Switch-student capture failed.");
   }
   return result;
 }
@@ -1637,6 +1683,433 @@ async function requestKhanActivitiesForStudentsFromPage(students, startDate, end
         error: error?.message || String(error)
       };
     }
+  }
+
+  function safeJsonParse(text) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+
+  function truncateText(text, maxLength) {
+    const value = String(text || "");
+    return value.length > maxLength ? `${value.slice(0, maxLength)}...[truncated ${value.length - maxLength} chars]` : value;
+  }
+
+  function delay(milliseconds) {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  }
+}
+
+async function captureKhanClassBySwitchingStudentsFromPage(startDate, endDate) {
+  if (!/khanacademy\.org/i.test(location.hostname)) {
+    return { ok: false, reason: "not a Khan frame", url: location.href, results: [] };
+  }
+
+  const resultsByKaid = new Map();
+  const diagnostics = {
+    startedAt: new Date().toISOString(),
+    startUrl: location.href,
+    switchControlText: "",
+    optionLabels: [],
+    clickAttempts: []
+  };
+
+  const firstCapture = await captureCurrentStudent();
+  if (firstCapture.studentKaid) resultsByKaid.set(firstCapture.studentKaid, firstCapture);
+
+  const optionLabels = await collectStudentOptionLabels();
+  diagnostics.optionLabels = optionLabels;
+  if (!optionLabels.length) {
+    return {
+      ok: true,
+      url: location.href,
+      startDate,
+      endDate,
+      results: Array.from(resultsByKaid.values()),
+      diagnostics
+    };
+  }
+
+  for (const label of optionLabels) {
+    const beforeKaid = getStudentKaidFromUrl(location.href);
+    const clickResult = await clickStudentOption(label);
+    diagnostics.clickAttempts.push({ label, ...clickResult });
+    if (!clickResult.ok) continue;
+
+    await waitForStudentRouteChange(beforeKaid, label, 4500);
+    await waitForActivityReportSettled(900);
+
+    const capture = await captureCurrentStudent();
+    if (capture.studentKaid) {
+      if (!capture.studentName || capture.studentName === capture.studentKaid) {
+        capture.studentName = label;
+      }
+      resultsByKaid.set(capture.studentKaid, capture);
+    }
+  }
+
+  return {
+    ok: true,
+    url: location.href,
+    startDate,
+    endDate,
+    results: Array.from(resultsByKaid.values()),
+    diagnostics
+  };
+
+  async function collectStudentOptionLabels() {
+    const opened = await openSwitchStudentMenu();
+    diagnostics.switchControlText = opened.switchControlText || "";
+    if (!opened.ok) return [];
+
+    const labels = new Map();
+    for (let pass = 0; pass < 12; pass += 1) {
+      for (const option of getStudentOptionElements()) {
+        const label = cleanStudentOptionText(option.textContent || option.getAttribute("aria-label") || option.getAttribute("title") || "");
+        if (looksLikeStudentOption(label)) labels.set(normalize(label), label);
+      }
+
+      const scroller = findScrollableMenu();
+      if (!scroller) break;
+      const before = scroller.scrollTop;
+      scroller.scrollTop = Math.min(scroller.scrollTop + Math.max(120, scroller.clientHeight - 40), scroller.scrollHeight);
+      await delay(180);
+      if (Math.abs(scroller.scrollTop - before) < 5) break;
+    }
+
+    closeMenus();
+    return Array.from(labels.values());
+  }
+
+  async function clickStudentOption(label) {
+    const opened = await openSwitchStudentMenu();
+    if (!opened.ok) return opened;
+
+    const targetKey = normalize(label);
+    const deadline = Date.now() + 2500;
+    while (Date.now() < deadline) {
+      const options = getStudentOptionElements();
+      const option = options.find((element) => normalize(cleanStudentOptionText(element.textContent || element.getAttribute("aria-label") || element.getAttribute("title") || "")) === targetKey);
+      if (option) {
+        clickElement(option);
+        return { ok: true };
+      }
+
+      const scroller = findScrollableMenu();
+      if (!scroller) break;
+      const before = scroller.scrollTop;
+      scroller.scrollTop = Math.min(scroller.scrollTop + Math.max(120, scroller.clientHeight - 40), scroller.scrollHeight);
+      await delay(160);
+      if (Math.abs(scroller.scrollTop - before) < 5) break;
+    }
+
+    closeMenus();
+    return { ok: false, reason: "student option not found after opening menu" };
+  }
+
+  async function captureCurrentStudent() {
+    const studentKaid = getStudentKaidFromUrl(location.href);
+    if (!studentKaid) {
+      return {
+        ok: false,
+        studentKaid: "",
+        studentName: inferCurrentStudentName(),
+        error: "student kaid not found in current URL",
+        sessions: []
+      };
+    }
+
+    const result = await requestKhanActivityForStudent(studentKaid);
+    result.studentName = inferCurrentStudentName() || result.studentName || studentKaid;
+    return result;
+  }
+
+  async function requestKhanActivityForStudent(studentKaid) {
+    const operationName = "KAClassroom_GetActivitySessions";
+    const query = `query KAClassroom_GetActivitySessions($studentKaid: String!, $startDate: Date, $endDate: Date, $activityKind: String, $after: ID, $pageSize: Int) {
+  user(kaid: $studentKaid) {
+    id
+    activityLogV2(
+      startDate: $startDate
+      endDate: $endDate
+      activityKind: $activityKind
+    ) {
+      time {
+        __typename
+        exerciseMinutes
+        totalMinutes
+      }
+      activitySessions(pageSize: $pageSize, after: $after) {
+        sessions {
+          id
+          itemTitle: title
+          itemSubtitle: subtitle
+          activityKind {
+            contentKind: id
+            __typename
+          }
+          durationMinutes
+          eventTimestamp
+          ... on MasteryActivitySession {
+            correctCount
+            problemCount
+            skillLevels {
+              id
+              after
+              __typename
+            }
+            __typename
+          }
+          __typename
+        }
+        pageInfo {
+          nextCursor
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+}`;
+
+    const requestUrl = new URL("https://classroom.khanacademy.org/api/internal/graphql/KAClassroom_GetActivitySessions");
+    requestUrl.searchParams.set("lang", "en");
+    requestUrl.searchParams.set("app", "classroom-teacher");
+    requestUrl.searchParams.set("_", String(Date.now()));
+
+    try {
+      const response = await fetch(requestUrl.href, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "content-type": "application/json",
+          "x-ka-fkey": "1"
+        },
+        body: JSON.stringify({
+          operationName,
+          query,
+          variables: {
+            studentKaid,
+            startDate,
+            endDate,
+            activityKind: null,
+            after: null,
+            pageSize: 50
+          }
+        })
+      });
+
+      const responseText = await response.text();
+      const json = safeJsonParse(responseText);
+      const activityLog = json?.data?.user?.activityLogV2;
+      const sessions = activityLog?.activitySessions?.sessions || [];
+
+      if (!response.ok || !activityLog) {
+        return {
+          ok: false,
+          studentKaid,
+          studentName: "",
+          status: response.status,
+          requestUrl: requestUrl.href,
+          reason: json?.errors?.[0]?.message || "activityLogV2 missing from Khan response",
+          responsePreview: truncateText(responseText, 1200),
+          sessions: []
+        };
+      }
+
+      return {
+        ok: true,
+        studentKaid,
+        studentName: "",
+        status: response.status,
+        requestUrl: requestUrl.href,
+        exerciseMinutes: activityLog.time?.exerciseMinutes ?? null,
+        timeOnTaskMinutes: activityLog.time?.totalMinutes ?? null,
+        nextCursor: activityLog.activitySessions?.pageInfo?.nextCursor || null,
+        sessions: sessions.map((session) => ({
+          id: session.id || "",
+          itemTitle: session.itemTitle || "",
+          itemSubtitle: session.itemSubtitle || "",
+          contentKind: session.activityKind?.contentKind || "",
+          durationMinutes: session.durationMinutes ?? null,
+          eventTimestamp: session.eventTimestamp || "",
+          correctCount: session.correctCount ?? null,
+          problemCount: session.problemCount ?? null
+        }))
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        studentKaid,
+        studentName: "",
+        requestUrl: requestUrl.href,
+        error: error?.message || String(error),
+        sessions: []
+      };
+    }
+  }
+
+  async function openSwitchStudentMenu() {
+    closeMenus();
+    await delay(100);
+
+    const control = findSwitchStudentControl();
+    if (!control) return { ok: false, reason: "Switch student control not found" };
+
+    const switchControlText = describeElement(control);
+    clickElement(control);
+
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      if (getStudentOptionElements().length) return { ok: true, switchControlText };
+      await delay(120);
+    }
+
+    return { ok: false, reason: "Switch student menu did not expose visible student options", switchControlText };
+  }
+
+  function findSwitchStudentControl() {
+    return Array.from(document.querySelectorAll("button,[role='button']"))
+      .filter(isVisible)
+      .find((element) => /switch\s*student/i.test(describeElement(element)));
+  }
+
+  function getStudentOptionElements() {
+    const containers = getMenuContainers();
+    const rootElements = containers.length ? containers : [document.body];
+    const options = [];
+    for (const root of rootElements) {
+      options.push(...Array.from(root.querySelectorAll("a,button,[role='option'],[role='menuitem'],[role='menuitemradio'],[tabindex],li,div")));
+    }
+
+    return uniqueElements(options)
+      .filter(isVisible)
+      .filter((element) => looksLikeStudentOption(cleanStudentOptionText(element.textContent || element.getAttribute("aria-label") || element.getAttribute("title") || "")));
+  }
+
+  function getMenuContainers() {
+    return Array.from(document.querySelectorAll("[role='listbox'],[role='menu'],[role='dialog'],[data-radix-popper-content-wrapper]"))
+      .filter(isVisible)
+      .filter((element) => /[a-z]/i.test(element.textContent || ""));
+  }
+
+  function findScrollableMenu() {
+    const candidates = [
+      ...getMenuContainers(),
+      ...getMenuContainers().flatMap((container) => Array.from(container.querySelectorAll("*")))
+    ].filter(isVisible);
+
+    return candidates.find((element) => element.scrollHeight > element.clientHeight + 20) || null;
+  }
+
+  function closeMenus() {
+    try {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    } catch {
+      // Best effort only.
+    }
+  }
+
+  function clickElement(element) {
+    element.scrollIntoView({ block: "center", inline: "center" });
+    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+      element.dispatchEvent(new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        view: window
+      }));
+    }
+    element.click();
+  }
+
+  async function waitForStudentRouteChange(beforeKaid, label, timeoutMs) {
+    const targetLabel = normalize(label);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const currentKaid = getStudentKaidFromUrl(location.href);
+      const currentName = normalize(inferCurrentStudentName());
+      if (currentKaid && currentKaid !== beforeKaid) return true;
+      if (currentName && currentName === targetLabel) return true;
+      await delay(150);
+    }
+    return false;
+  }
+
+  async function waitForActivityReportSettled(milliseconds) {
+    await delay(milliseconds);
+  }
+
+  function inferCurrentStudentName() {
+    const heading = Array.from(document.querySelectorAll("h1,h2,h3,[role='heading']"))
+      .filter(isVisible)
+      .map((element) => cleanStudentOptionText(element.textContent || ""))
+      .find(looksLikeStudentOption);
+    if (heading) return heading;
+
+    const selected = Array.from(document.querySelectorAll("[aria-selected='true'], option:checked"))
+      .map((element) => cleanStudentOptionText(element.textContent || element.getAttribute("label") || ""))
+      .find(looksLikeStudentOption);
+    return selected || "";
+  }
+
+  function looksLikeStudentOption(value) {
+    const text = cleanStudentOptionText(value);
+    if (text.length < 3 || text.length > 80) return false;
+    if (!/[a-z]/i.test(text)) return false;
+    if (/kaid_/i.test(text)) return false;
+    if (/\b(report|activity|date|filter|exercise|time on task|dashboard|class|teacher|settings|assignments|skills|overview|search|subjects|minutes|log|switch student|browse|feedback|last 7 days|last week|all time)\b/i.test(text)) return false;
+    return true;
+  }
+
+  function cleanStudentOptionText(value) {
+    return compactText(value)
+      .replace(/\b(selected|student|learner)\b/gi, " ")
+      .replace(/kaid_[A-Za-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function describeElement(element) {
+    return compactText([
+      element.tagName,
+      element.textContent,
+      element.getAttribute("aria-label"),
+      element.getAttribute("title")
+    ].filter(Boolean).join(" "));
+  }
+
+  function getStudentKaidFromUrl(url) {
+    const match = String(url || "").match(/individual-student\/(kaid_[A-Za-z0-9]+)/i);
+    return match ? match[1] : "";
+  }
+
+  function normalize(value) {
+    return compactText(value)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9, ]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function uniqueElements(elements) {
+    return Array.from(new Set(elements));
+  }
+
+  function isVisible(element) {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+  }
+
+  function compactText(value) {
+    return String(value || "").replace(/\u00a0/g, " ").replace(/[ \t\r\n]+/g, " ").trim();
   }
 
   function safeJsonParse(text) {

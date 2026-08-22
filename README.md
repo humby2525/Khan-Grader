@@ -26,10 +26,11 @@ The class capture:
 1. Looks for student Khan IDs on the current report page.
 2. Opens the Khan **Switch student** control if it can find it.
 3. Collects every student `kaid` it can see.
-4. Requests the same start/end date report for each student.
-5. Displays one row per student and exports a class CSV.
+4. If the IDs are not exposed directly, it clicks through the visible Switch-student options and reads each student's URL.
+5. Requests the same start/end date report for each student.
+6. Displays one row per student and exports a class CSV.
 
-If Khan does not expose the roster until the menu has been opened manually, click **Switch student** once in Khan, leave the report page open, then run **Capture Class via Khan API** again.
+If Khan does not expose the roster directly, the Khan tab may visibly move from student to student during capture. Leave the Khan tab open until the extension finishes.
 
 ## Network probe
 
