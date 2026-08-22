@@ -17,6 +17,20 @@ This first version is intentionally Khan-only. It does not connect to Schoology,
 
 The older **Capture Current Student** button is still available as a rendered-page fallback, but the preferred test path is now **Capture via Khan API**. That API capture uses Khan's logged-in browser session and sends the selected dates directly to Khan's Individual Student Report request. It does not store a Khan or Google password.
 
+## Class API capture
+
+After the one-student API capture works, test **Capture Class via Khan API** from the same Individual Student Report page.
+
+The class capture:
+
+1. Looks for student Khan IDs on the current report page.
+2. Opens the Khan **Switch student** control if it can find it.
+3. Collects every student `kaid` it can see.
+4. Requests the same start/end date report for each student.
+5. Displays one row per student and exports a class CSV.
+
+If Khan does not expose the roster until the menu has been opened manually, click **Switch student** once in Khan, leave the report page open, then run **Capture Class via Khan API** again.
+
 ## Network probe
 
 Use the network probe to test whether Khan sends report dates in its own request data.
@@ -39,4 +53,4 @@ The probe runs only in the current browser session and stores output locally in 
 
 ## Status
 
-This is a capture proof of concept. The current milestone is one-student structured API capture from the Individual Student Report before automating student switching.
+This is a capture proof of concept. The current milestone is structured API capture from the Individual Student Report, first for one student and then for every student whose Khan ID is discoverable from the Switch student control.

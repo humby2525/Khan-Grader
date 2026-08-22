@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.5.0";
+const BUILD_VERSION = "0.6.0";
 const STORAGE_KEY = "khanGrader.lastCapture";
 
 const elements = {};
@@ -14,6 +14,7 @@ async function init() {
 
   elements.build.textContent = `v${BUILD_VERSION}`;
   elements.captureApiButton.addEventListener("click", captureCurrentStudentViaApi);
+  elements.captureClassApiButton.addEventListener("click", captureClassViaApi);
   elements.captureButton.addEventListener("click", captureCurrentTab);
   elements.startNetworkProbeButton.addEventListener("click", startNetworkProbe);
   elements.collectNetworkProbeButton.addEventListener("click", collectNetworkProbe);
@@ -197,6 +198,47 @@ async function captureCurrentStudentViaApi() {
   }
 }
 
+async function captureClassViaApi() {
+  const startDate = elements.weekStart.value;
+  const endDate = elements.weekEnd.value;
+  if (!startDate || !endDate) {
+    setError("Choose a start date and end date before using the Khan class API capture.");
+    return;
+  }
+  if (startDate > endDate) {
+    setError("The start date must be before or equal to the end date.");
+    return;
+  }
+
+  const tab = await findKhanTab();
+  if (!tab?.id) {
+    setError("Open the Khan Individual Student Report tab before using the Khan class API capture.");
+    return;
+  }
+
+  setStatus("Looking for students in the Khan Switch student control...");
+
+  try {
+    const rosterResult = await collectKhanRoster(tab);
+    if (!rosterResult.students.length) {
+      throw new Error("No students with Khan IDs were found. Open the Individual Student Report, click Switch student once, then try again.");
+    }
+
+    setStatus(`Found ${rosterResult.students.length} student(s). Requesting Khan minutes for ${startDate} through ${endDate}...`);
+    const apiResult = await requestKhanActivitiesForRoster(tab, rosterResult.students, startDate, endDate);
+    lastCapture = buildClassApiCapture(tab, rosterResult, apiResult, startDate, endDate);
+
+    await chrome.storage.local.set({ [STORAGE_KEY]: lastCapture });
+    renderCapture(lastCapture);
+
+    const failedCount = lastCapture.studentSummaries.filter((student) => student.error).length;
+    const status = `Captured ${lastCapture.studentSummaries.length} student(s) from Khan API`;
+    setStatus(failedCount ? `${status}; ${failedCount} had errors. Copy Diagnostics for details.` : `${status}.`);
+  } catch (error) {
+    setError(error.message || String(error));
+  }
+}
+
 async function findKhanTab() {
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (isKhanTab(activeTab)) return activeTab;
@@ -291,6 +333,43 @@ async function requestKhanActivityForCurrentStudent(tab, startDate, endDate) {
   throw new Error(usefulErrors || "Khan API capture did not return activity data. Make sure the current Khan tab is an Individual Student Report page.");
 }
 
+async function collectKhanRoster(tab) {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id, allFrames: true },
+    func: collectKhanStudentRosterFromPage
+  });
+
+  const frameResults = results
+    .map((item, index) => ({ frameIndex: index + 1, ...(item.result || {}) }))
+    .filter((result) => result.url || result.reason || result.students?.length);
+
+  return {
+    collectedAt: new Date().toISOString(),
+    pageUrl: tab.url,
+    pageTitle: tab.title,
+    students: dedupeRosterStudents(frameResults.flatMap((frame) => frame.students || [])),
+    frameResults
+  };
+}
+
+async function requestKhanActivitiesForRoster(tab, students, startDate, endDate) {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    world: "MAIN",
+    func: requestKhanActivitiesForStudentsFromPage,
+    args: [students, startDate, endDate]
+  });
+
+  const result = results.find((item) => item.result?.ok || item.result?.results || item.result?.error)?.result;
+  if (!result) {
+    throw new Error("Khan class API capture did not return a result from the current tab.");
+  }
+  if (!result.ok) {
+    throw new Error(result.error || result.reason || "Khan class API capture failed.");
+  }
+  return result;
+}
+
 function buildApiCapture(tab, pageCapture, apiResult, startDate, endDate) {
   const studentName = pageCapture?.studentSummary?.studentName || apiResult.studentName || apiResult.studentKaid || "";
   const dateRange = `${startDate} - ${endDate}`;
@@ -336,6 +415,66 @@ function buildApiCapture(tab, pageCapture, apiResult, startDate, endDate) {
   };
 }
 
+function buildClassApiCapture(tab, rosterResult, apiResult, startDate, endDate) {
+  const dateRange = `${startDate} - ${endDate}`;
+  const studentSummaries = apiResult.results.map((result) => ({
+    studentName: result.studentName || result.studentKaid,
+    studentKaid: result.studentKaid,
+    exerciseMinutes: result.exerciseMinutes,
+    timeOnTaskMinutes: result.timeOnTaskMinutes,
+    detectedDateRange: dateRange,
+    sourceText: result.ok ? "Khan GraphQL KAClassroom_GetActivitySessions" : result.error || result.reason || "Khan API error",
+    error: result.ok ? "" : result.error || result.reason || `HTTP ${result.status || "unknown"}`
+  }));
+  const successful = studentSummaries.filter((student) => !student.error);
+  const totalExerciseMinutes = successful.reduce((total, student) => total + Number(student.exerciseMinutes || 0), 0);
+  const totalTimeOnTaskMinutes = successful.reduce((total, student) => total + Number(student.timeOnTaskMinutes || 0), 0);
+  const activityRows = apiResult.results.flatMap((result) => (result.sessions || []).map((session) => ({
+    dateText: formatActivityDate(session.eventTimestamp),
+    activity: compactText([result.studentName || result.studentKaid, session.itemTitle, session.itemSubtitle].filter(Boolean).join(" - ")) || session.contentKind || "Activity",
+    minutes: session.durationMinutes ?? "",
+    sourceText: `Khan API session ${session.id || ""}`.trim()
+  })));
+
+  return {
+    pageUrl: tab.url,
+    pageTitle: tab.title,
+    bestFrameUrl: tab.url,
+    bestFrameTitle: tab.title,
+    pageKind: "class-api",
+    dateRange,
+    expectedWeekStart: startDate,
+    expectedWeekEnd: endDate,
+    capturedAt: new Date().toISOString(),
+    studentSummary: {
+      studentName: `${studentSummaries.length} students`,
+      exerciseMinutes: totalExerciseMinutes,
+      timeOnTaskMinutes: totalTimeOnTaskMinutes,
+      detectedDateRange: dateRange,
+      sourceText: "Khan GraphQL class capture"
+    },
+    studentSummaries,
+    rows: studentSummaries.map((student) => ({
+      name: student.studentName,
+      minutes: student.timeOnTaskMinutes ?? "",
+      sourceText: student.error || `Exercises ${student.exerciseMinutes ?? ""}; Time on task ${student.timeOnTaskMinutes ?? ""}`
+    })),
+    activityRows,
+    frameReports: [],
+    structuredApi: {
+      operationName: "KAClassroom_GetActivitySessions",
+      startDate,
+      endDate,
+      rosterCount: rosterResult.students.length,
+      successCount: successful.length,
+      errorCount: studentSummaries.length - successful.length,
+      roster: rosterResult.students,
+      rosterFrames: rosterResult.frameResults,
+      results: apiResult.results
+    }
+  };
+}
+
 function renderCapture(capture) {
   const studentSummary = capture.studentSummary || emptyStudentSummary();
   elements.studentName.textContent = studentSummary.studentName || "Not detected";
@@ -347,7 +486,7 @@ function renderCapture(capture) {
   elements.downloadButton.disabled = !hasStudentSummary(studentSummary) && capture.rows.length === 0 && (capture.activityRows?.length || 0) === 0;
   elements.copyDiagnosticsButton.disabled = false;
 
-  renderStudentSummary(studentSummary);
+  renderStudentSummary(studentSummary, capture.studentSummaries || []);
   renderTable(capture.rows);
   renderActivityTable(capture.activityRows || []);
   elements.diagnostics.textContent = formatDiagnostics(capture);
@@ -364,11 +503,12 @@ function scoreReport(report) {
   return score;
 }
 
-function renderStudentSummary(summary) {
-  elements.studentSummaryTable.className = hasStudentSummary(summary) ? "table" : "table empty";
+function renderStudentSummary(summary, summaries = []) {
+  const rows = summaries.length ? summaries : hasStudentSummary(summary) ? [summary] : [];
+  elements.studentSummaryTable.className = rows.length ? "table" : "table empty";
   elements.studentSummaryTable.innerHTML = "";
 
-  if (!hasStudentSummary(summary)) {
+  if (!rows.length) {
     elements.studentSummaryTable.textContent = "No Individual Student Report metrics captured.";
     return;
   }
@@ -378,15 +518,17 @@ function renderStudentSummary(summary) {
   header.innerHTML = "<div>Student</div><div>Exercises</div><div>Time on task</div><div>Date range</div>";
   elements.studentSummaryTable.append(header);
 
-  const line = document.createElement("div");
-  line.className = "row student-report";
-  line.innerHTML = `
-    <div>${escapeHtml(summary.studentName || "Not detected")}</div>
-    <div>${escapeHtml(formatMinutes(summary.exerciseMinutes))}</div>
-    <div>${escapeHtml(formatMinutes(summary.timeOnTaskMinutes))}</div>
-    <div>${escapeHtml(summary.detectedDateRange || "Not detected")}</div>
-  `;
-  elements.studentSummaryTable.append(line);
+  for (const row of rows) {
+    const line = document.createElement("div");
+    line.className = "row student-report";
+    line.innerHTML = `
+      <div>${escapeHtml(row.studentName || "Not detected")}${row.error ? `<div class="source">${escapeHtml(row.error)}</div>` : ""}</div>
+      <div>${escapeHtml(formatMinutes(row.exerciseMinutes))}</div>
+      <div>${escapeHtml(formatMinutes(row.timeOnTaskMinutes))}</div>
+      <div>${escapeHtml(row.detectedDateRange || "Not detected")}</div>
+    `;
+    elements.studentSummaryTable.append(line);
+  }
 }
 
 function renderTable(rows) {
@@ -455,6 +597,7 @@ function formatDiagnostics(capture) {
     pageKind: capture.pageKind,
     detectedDateRange: capture.dateRange,
     studentSummary: capture.studentSummary || emptyStudentSummary(),
+    studentSummaries: capture.studentSummaries || [],
     structuredApi: capture.structuredApi || null,
     rowCount: capture.rows.length,
     activityRowCount: capture.activityRows?.length || 0,
@@ -481,7 +624,23 @@ function downloadCsv() {
 
   const activityRows = lastCapture.activityRows || [];
   const studentSummary = lastCapture.studentSummary || emptyStudentSummary();
-  const csv = hasStudentSummary(studentSummary)
+  const studentSummaries = lastCapture.studentSummaries || [];
+  const csv = studentSummaries.length
+    ? [
+      "Expected Week Start,Expected Week End,Khan Date Range,Student,Student KAID,Exercise Minutes,Time On Task Minutes,Error,Source",
+      ...studentSummaries.map((row) => [
+        lastCapture.expectedWeekStart,
+        lastCapture.expectedWeekEnd,
+        row.detectedDateRange || lastCapture.dateRange,
+        row.studentName,
+        row.studentKaid || "",
+        row.exerciseMinutes ?? "",
+        row.timeOnTaskMinutes ?? "",
+        row.error || "",
+        row.sourceText || ""
+      ].map(csvCell).join(","))
+    ].join("\n")
+    : hasStudentSummary(studentSummary)
     ? [
       "Expected Week Start,Expected Week End,Khan Date Range,Student,Exercise Minutes,Time On Task Minutes,Source",
       [
@@ -573,6 +732,24 @@ function dedupeRows(rows) {
     if (!current || row.sourceText.length < current.sourceText.length) byName.set(key, row);
   }
   return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function dedupeRosterStudents(students) {
+  const byKaid = new Map();
+  for (const student of students) {
+    const kaid = String(student.kaid || "").trim();
+    if (!kaid) continue;
+    const current = byKaid.get(kaid);
+    const next = {
+      kaid,
+      name: compactText(student.name || ""),
+      source: student.source || ""
+    };
+    if (!current || (!current.name && next.name) || next.source === "current-page") {
+      byKaid.set(kaid, next);
+    }
+  }
+  return Array.from(byKaid.values()).sort((a, b) => (a.name || a.kaid).localeCompare(b.name || b.kaid));
 }
 
 function normalizeName(value) {
@@ -1069,5 +1246,333 @@ async function requestKhanActivityFromPage(startDate, endDate) {
   function truncateText(text, maxLength) {
     const value = String(text || "");
     return value.length > maxLength ? `${value.slice(0, maxLength)}...[truncated ${value.length - maxLength} chars]` : value;
+  }
+}
+
+async function collectKhanStudentRosterFromPage() {
+  if (!/khanacademy\.org/i.test(location.hostname)) {
+    return { ok: false, reason: "not a Khan frame", url: location.href, students: [] };
+  }
+
+  const before = collectStudents();
+  const switchControl = findSwitchStudentControl();
+  if (switchControl) {
+    try {
+      switchControl.click();
+      await delay(900);
+    } catch {
+      // The initial DOM scan may still have enough roster data.
+    }
+  }
+
+  const after = collectStudents();
+  try {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  } catch {
+    // Closing the menu is best effort only.
+  }
+
+  return {
+    ok: true,
+    url: location.href,
+    title: document.title,
+    openedSwitchStudent: Boolean(switchControl),
+    students: dedupe([...before, ...after])
+  };
+
+  function collectStudents() {
+    const students = [];
+    const currentKaid = getStudentKaidFromUrl(location.href);
+    if (currentKaid) {
+      students.push({
+        kaid: currentKaid,
+        name: inferCurrentStudentName(),
+        source: "current-page"
+      });
+    }
+
+    const elements = Array.from(document.querySelectorAll([
+      "a[href*='individual-student/kaid_']",
+      "a[href*='kaid_']",
+      "button",
+      "[role='button']",
+      "[role='option']",
+      "[role='menuitem']",
+      "[aria-label]",
+      "[title]",
+      "option"
+    ].join(",")));
+
+    for (const element of elements) {
+      const sourceText = [
+        element.getAttribute("href"),
+        element.getAttribute("aria-label"),
+        element.getAttribute("title"),
+        element.getAttribute("value"),
+        element.textContent,
+        ...Object.values(element.dataset || {})
+      ].filter(Boolean).join(" ");
+
+      for (const kaid of findKaids(sourceText)) {
+        students.push({
+          kaid,
+          name: cleanStudentName(element.textContent || element.getAttribute("aria-label") || element.getAttribute("title") || ""),
+          source: element.tagName.toLowerCase()
+        });
+      }
+    }
+
+    const html = document.documentElement?.innerHTML || "";
+    for (const kaid of findKaids(html).slice(0, 200)) {
+      students.push({ kaid, name: "", source: "html" });
+    }
+
+    return students;
+  }
+
+  function findSwitchStudentControl() {
+    return Array.from(document.querySelectorAll("button,[role='button']"))
+      .filter(isVisible)
+      .find((element) => /switch\s*student/i.test(compactText([
+        element.textContent,
+        element.getAttribute("aria-label"),
+        element.getAttribute("title")
+      ].filter(Boolean).join(" "))));
+  }
+
+  function inferCurrentStudentName() {
+    const heading = Array.from(document.querySelectorAll("h1,h2,h3,[role='heading']"))
+      .filter(isVisible)
+      .map((element) => cleanStudentName(element.textContent || ""))
+      .find(looksLikeStudentName);
+    if (heading) return heading;
+
+    const selected = Array.from(document.querySelectorAll("[aria-selected='true'], option:checked"))
+      .map((element) => cleanStudentName(element.textContent || element.getAttribute("label") || ""))
+      .find(looksLikeStudentName);
+    return selected || "";
+  }
+
+  function findKaids(text) {
+    const matches = String(text || "").match(/kaid_[A-Za-z0-9]+/g) || [];
+    return Array.from(new Set(matches));
+  }
+
+  function dedupe(students) {
+    const byKaid = new Map();
+    for (const student of students) {
+      const kaid = String(student.kaid || "").trim();
+      if (!kaid) continue;
+      const next = {
+        kaid,
+        name: cleanStudentName(student.name || ""),
+        source: student.source || ""
+      };
+      const current = byKaid.get(kaid);
+      if (!current || (!current.name && next.name) || next.source === "current-page") {
+        byKaid.set(kaid, next);
+      }
+    }
+    return Array.from(byKaid.values());
+  }
+
+  function cleanStudentName(value) {
+    return compactText(value)
+      .replace(/\b(switch student|student|learner|selected)\b/gi, " ")
+      .replace(/kaid_[A-Za-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function looksLikeStudentName(value) {
+    const text = cleanStudentName(value);
+    if (text.length < 3 || text.length > 80) return false;
+    if (!/[a-z]/i.test(text)) return false;
+    if (/\d/.test(text)) return false;
+    return !/\b(report|activity|date|filter|exercise|time on task|dashboard|class|teacher|settings|assignments|skills|overview|search|subjects|minutes|log)\b/i.test(text);
+  }
+
+  function isVisible(element) {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+  }
+
+  function compactText(value) {
+    return String(value || "").replace(/\u00a0/g, " ").replace(/[ \t\r\n]+/g, " ").trim();
+  }
+
+  function getStudentKaidFromUrl(url) {
+    const match = String(url || "").match(/individual-student\/(kaid_[A-Za-z0-9]+)/i);
+    return match ? match[1] : "";
+  }
+
+  function delay(milliseconds) {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  }
+}
+
+async function requestKhanActivitiesForStudentsFromPage(students, startDate, endDate) {
+  if (!/khanacademy\.org/i.test(location.hostname)) {
+    return { ok: false, reason: "not a Khan frame", url: location.href, results: [] };
+  }
+
+  const operationName = "KAClassroom_GetActivitySessions";
+  const query = `query KAClassroom_GetActivitySessions($studentKaid: String!, $startDate: Date, $endDate: Date, $activityKind: String, $after: ID, $pageSize: Int) {
+  user(kaid: $studentKaid) {
+    id
+    activityLogV2(
+      startDate: $startDate
+      endDate: $endDate
+      activityKind: $activityKind
+    ) {
+      time {
+        __typename
+        exerciseMinutes
+        totalMinutes
+      }
+      activitySessions(pageSize: $pageSize, after: $after) {
+        sessions {
+          id
+          itemTitle: title
+          itemSubtitle: subtitle
+          activityKind {
+            contentKind: id
+            __typename
+          }
+          durationMinutes
+          eventTimestamp
+          ... on MasteryActivitySession {
+            correctCount
+            problemCount
+            skillLevels {
+              id
+              after
+              __typename
+            }
+            __typename
+          }
+          __typename
+        }
+        pageInfo {
+          nextCursor
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+}`;
+
+  const results = [];
+  for (const student of students) {
+    results.push(await requestStudent(student));
+    await delay(125);
+  }
+
+  return {
+    ok: true,
+    url: location.href,
+    operationName,
+    startDate,
+    endDate,
+    results
+  };
+
+  async function requestStudent(student) {
+    const studentKaid = student.kaid;
+    const requestUrl = new URL("https://classroom.khanacademy.org/api/internal/graphql/KAClassroom_GetActivitySessions");
+    requestUrl.searchParams.set("lang", "en");
+    requestUrl.searchParams.set("app", "classroom-teacher");
+    requestUrl.searchParams.set("_", String(Date.now()));
+
+    const body = JSON.stringify({
+      operationName,
+      query,
+      variables: {
+        studentKaid,
+        startDate,
+        endDate,
+        activityKind: null,
+        after: null,
+        pageSize: 50
+      }
+    });
+
+    try {
+      const response = await fetch(requestUrl.href, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "content-type": "application/json",
+          "x-ka-fkey": "1"
+        },
+        body
+      });
+      const responseText = await response.text();
+      const json = safeJsonParse(responseText);
+      const activityLog = json?.data?.user?.activityLogV2;
+      const sessions = activityLog?.activitySessions?.sessions || [];
+
+      if (!response.ok || !activityLog) {
+        return {
+          ok: false,
+          studentKaid,
+          studentName: student.name || "",
+          status: response.status,
+          requestUrl: requestUrl.href,
+          reason: json?.errors?.[0]?.message || "activityLogV2 missing from Khan response",
+          responsePreview: truncateText(responseText, 1200)
+        };
+      }
+
+      return {
+        ok: true,
+        studentKaid,
+        studentName: student.name || "",
+        status: response.status,
+        requestUrl: requestUrl.href,
+        exerciseMinutes: activityLog.time?.exerciseMinutes ?? null,
+        timeOnTaskMinutes: activityLog.time?.totalMinutes ?? null,
+        nextCursor: activityLog.activitySessions?.pageInfo?.nextCursor || null,
+        sessions: sessions.map((session) => ({
+          id: session.id || "",
+          itemTitle: session.itemTitle || "",
+          itemSubtitle: session.itemSubtitle || "",
+          contentKind: session.activityKind?.contentKind || "",
+          durationMinutes: session.durationMinutes ?? null,
+          eventTimestamp: session.eventTimestamp || "",
+          correctCount: session.correctCount ?? null,
+          problemCount: session.problemCount ?? null
+        }))
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        studentKaid,
+        studentName: student.name || "",
+        requestUrl: requestUrl.href,
+        error: error?.message || String(error)
+      };
+    }
+  }
+
+  function safeJsonParse(text) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+
+  function truncateText(text, maxLength) {
+    const value = String(text || "");
+    return value.length > maxLength ? `${value.slice(0, maxLength)}...[truncated ${value.length - maxLength} chars]` : value;
+  }
+
+  function delay(milliseconds) {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 }

@@ -92,7 +92,7 @@ h2 {
 .controls {
   align-items: end;
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto auto auto auto auto;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 14px;
 }
 
