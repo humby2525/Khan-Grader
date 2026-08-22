@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.9.2";
+const BUILD_VERSION = "0.9.3";
 const STORAGE_KEY = "khanGrader.lastCapture";
 const CLASS_CONFIG_STORAGE_KEY = "khanGrader.classConfigs";
 const SCHOOLOGY_CONFIG_STORAGE_KEY = "khanGrader.schoologyConfig";
@@ -1348,91 +1348,16 @@ async function submitSchoologyGrades(rows, schoologyConfig) {
 }
 
 async function schoologyFetchJson(path, options, schoologyConfig) {
-  const method = options.method || "GET";
-  const apiBase = schoologyConfig.apiBase.replace(/\/+$/, "");
-  const url = new URL(`${apiBase}${path.startsWith("/") ? "" : "/"}${path}`);
-  const bodyText = options.body ? JSON.stringify(options.body) : null;
-  const headers = {
-    Accept: "application/json",
-    Authorization: await buildSchoologyAuthorizationHeader(method, url, schoologyConfig)
-  };
-  if (bodyText) headers["Content-Type"] = "application/json";
-
-  let response;
-  try {
-    response = await fetch(url.toString(), {
-      method,
-      headers,
-      body: bodyText
-    });
-  } catch (error) {
-    throw new Error(`Schoology request failed before the API responded. Reload the extension after updating it, then try again. Details: ${error.message || String(error)}`);
+  const response = await chrome.runtime.sendMessage({
+    type: "SCHOOLOGY_API_FETCH",
+    path,
+    options,
+    schoologyConfig
+  });
+  if (!response?.ok) {
+    throw new Error(response?.error || "Schoology request failed.");
   }
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`Schoology API ${response.status}: ${text || response.statusText}`);
-  }
-  if (!text.trim()) return {};
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { raw: text };
-  }
-}
-
-async function buildSchoologyAuthorizationHeader(method, url, schoologyConfig) {
-  const oauthParams = {
-    oauth_consumer_key: schoologyConfig.consumerKey,
-    oauth_nonce: createOAuthNonce(),
-    oauth_signature_method: "HMAC-SHA1",
-    oauth_timestamp: String(Math.floor(Date.now() / 1000)),
-    oauth_version: "1.0"
-  };
-  const signature = await signOAuthRequest(method, url, oauthParams, schoologyConfig.consumerSecret);
-  return "OAuth " + Object.entries({ ...oauthParams, oauth_signature: signature })
-    .map(([key, value]) => `${percentEncode(key)}="${percentEncode(value)}"`)
-    .join(", ");
-}
-
-async function signOAuthRequest(method, url, oauthParams, consumerSecret) {
-  const baseUrl = `${url.protocol}//${url.host}${url.pathname}`;
-  const params = [];
-  for (const [key, value] of url.searchParams.entries()) params.push([key, value]);
-  for (const [key, value] of Object.entries(oauthParams)) params.push([key, value]);
-  params.sort((a, b) => percentEncode(a[0]).localeCompare(percentEncode(b[0])) || percentEncode(a[1]).localeCompare(percentEncode(b[1])));
-
-  const paramString = params.map(([key, value]) => `${percentEncode(key)}=${percentEncode(value)}`).join("&");
-  const signatureBase = [
-    method.toUpperCase(),
-    percentEncode(baseUrl),
-    percentEncode(paramString)
-  ].join("&");
-  const signingKey = `${percentEncode(consumerSecret)}&`;
-  return hmacSha1Base64(signingKey, signatureBase);
-}
-
-async function hmacSha1Base64(key, text) {
-  const encoder = new TextEncoder();
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(key),
-    { name: "HMAC", hash: "SHA-1" },
-    false,
-    ["sign"]
-  );
-  const signature = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(text));
-  return btoa(String.fromCharCode(...new Uint8Array(signature)));
-}
-
-function createOAuthNonce() {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return `${Date.now()}-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
-}
-
-function percentEncode(value) {
-  return encodeURIComponent(String(value))
-    .replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  return response.json || {};
 }
 
 function normalizeArray(value) {
