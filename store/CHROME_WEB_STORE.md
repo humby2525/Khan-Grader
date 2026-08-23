@@ -113,6 +113,6 @@ Choose **Unlisted**. The extension will not appear in Chrome Web Store search, b
 
 - Store icon: `icons/icon-128.png`
 - Dashboard screenshot: `store-assets/dashboard-1280x800.png`
-- Small promotional image: `store-assets/small-promo-440x280.png`
+- Small promotional image: `store-assets/small-promo-440x280-rgb.png`
 
 Keep real student names, API credentials, section IDs, and other school data out of listing screenshots.

@@ -1,4 +1,6 @@
-param()
+param(
+  [switch]$PromoOnly
+)
 
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
@@ -23,6 +25,7 @@ function New-RoundedRectanglePath {
   return $path
 }
 
+if (-not $PromoOnly) {
 foreach ($size in @(16, 32, 48, 128)) {
   $bitmap = [System.Drawing.Bitmap]::new($size, $size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
   $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
@@ -70,11 +73,12 @@ foreach ($size in @(16, 32, 48, 128)) {
 }
 
 Write-Output "Generated Chrome extension icons in $iconDirectory"
+}
 
 $assetDirectory = Join-Path $repoRoot "store-assets"
 New-Item -ItemType Directory -Path $assetDirectory -Force | Out-Null
 
-$promo = [System.Drawing.Bitmap]::new(440, 280, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+$promo = [System.Drawing.Bitmap]::new(440, 280, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
 $promoGraphics = [System.Drawing.Graphics]::FromImage($promo)
 $promoGraphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
 $promoGraphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
@@ -95,7 +99,7 @@ $promoGraphics.DrawString("Khan Grader", $titleFont, $titleBrush, 194, 94)
 $subtitleBounds = [System.Drawing.RectangleF]::new(196, 137, 205, 72)
 $promoGraphics.DrawString("Weekly minutes to`nteacher-reviewed grades", $subtitleFont, $subtitleBrush, $subtitleBounds)
 
-$promoPath = Join-Path $assetDirectory "small-promo-440x280.png"
+$promoPath = Join-Path $assetDirectory "small-promo-440x280-rgb.png"
 $promo.Save($promoPath, [System.Drawing.Imaging.ImageFormat]::Png)
 
 $subtitleBrush.Dispose()
