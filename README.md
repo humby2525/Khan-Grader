@@ -85,7 +85,7 @@ Each saved class can have its own goal minutes. If a class goal is blank, the ex
 
 ## Prepare Schoology assignments
 
-Use **Create Assignments** before the week starts if you want students to see the Khan assignment in Schoology.
+Use **Prepare Assignments** before the week starts if you want students to see the Khan assignment in Schoology.
 
 Set up Schoology choices once for each class:
 
@@ -100,13 +100,13 @@ For each weekly assignment:
 1. Choose the week start and end dates.
 2. Enter an assignment title template, such as `Khan Minutes - Week of {startDate}`.
 3. Enter a due date and due time. If due date is blank, the extension uses the selected week end date.
-4. Click **Create Assignments**.
+4. Click **Prepare Assignments**.
 
 The extension checks every page of each section's assignment list for an existing assignment with the same normalized title. It also verifies any internally saved assignment ID directly. If it finds a published, available, count-in-grade assignment whose documented category and period match the class setup, it reuses that assignment. If it does not find a reusable match, it creates the assignment and saves the returned ID internally. The assignment description tells students to spend the class goal minutes on Khan that week.
 
-Schoology category, period, and task IDs can differ by section even when the visible name is the same. For that reason, category, period, and optional task ID are saved with each class. The assignment ID is hidden because the extension manages it after **Create Assignments**.
+Schoology category, period, and task IDs can differ by section even when the visible name is the same. For that reason, category, period, and optional task ID are saved with each class. The assignment ID is hidden because the extension manages it after **Prepare Assignments**.
 
-After finding or creating each assignment, the extension fetches it back from Schoology and shows the published, available, count-in-grade, due date, category, period, points, and API self link in the assignment results table. If Schoology still lists a deleted or unusable matching assignment, the extension records why it was rejected and creates a new assignment. If the Schoology page does not show the assignment, copy the Network Probe output after running **Create Assignments**.
+After preparation, the extension shows one result card per class labeled **Existing assignment reused**, **New assignment created**, or **Needs attention**. Each card includes the assignment details and how many Schoology assignments were checked. If Schoology still lists a deleted or unusable matching assignment, the extension records why it was rejected and creates a new assignment. If the Schoology page does not show the assignment, copy the Network Probe output after running **Prepare Assignments**.
 
 Schoology's public assignment API documents `grading_category` and `grading_period` for assignment creation. It does not document a matching assignment field or option endpoint for the Schoology UI's grading task dropdown. The extension includes the optional per-class task ID in assignment creation, but it does not reject an otherwise valid existing assignment when Schoology omits that undocumented field from the response.
 
@@ -123,7 +123,7 @@ Supported title placeholders:
 
 Use this when Schoology has the current roster but Khan does not yet.
 
-1. Use **Create Assignments** to create a temporary test assignment.
+1. Use **Prepare Assignments** to create a temporary test assignment.
 2. Enter a fake value in **Test minutes**.
 3. Click **Preview Test Grades**.
 4. Confirm that the roster names, enrollment IDs, and calculated grades look right.

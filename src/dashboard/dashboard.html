@@ -13,7 +13,7 @@
           <h1>Khan Grader</h1>
           <p>Khan Academy minutes to Schoology grades.</p>
         </div>
-        <span id="build">v0.15.1</span>
+        <span id="build">v0.16.0</span>
       </header>
 
       <section class="panel weekly-panel">
@@ -33,7 +33,7 @@
         <div class="workflow-actions">
           <button id="prepareAssignmentsButton" class="workflow-action" type="button">
             <span class="step-number">1</span>
-            <span><strong>Create Assignments</strong><small>Before the week</small></span>
+            <span><strong>Prepare Assignments</strong><small>Reuse existing or create missing</small></span>
           </button>
           <button id="captureAllClassesButton" class="workflow-action" type="button">
             <span class="step-number">2</span>
@@ -61,7 +61,7 @@
         </details>
       </section>
 
-      <p id="status" class="status" role="status" aria-live="polite">Choose the week, then start with Create Assignments.</p>
+      <p id="status" class="status" role="status" aria-live="polite">Choose the week, then start with Prepare Assignments.</p>
 
       <section class="summary-grid" aria-label="Latest Khan capture summary">
         <article>
@@ -94,8 +94,14 @@
         <div class="section-header">
           <h2>Assignments &amp; Grades</h2>
         </div>
-        <div id="assignmentTable" class="table empty">No Schoology assignments prepared yet.</div>
-        <div id="schoologyPreviewTable" class="table empty">No grade preview yet.</div>
+        <div class="result-block">
+          <h3 class="result-subtitle">Assignment preparation</h3>
+          <div id="assignmentTable" class="assignment-results empty">No Schoology assignments prepared yet.</div>
+        </div>
+        <div class="result-block">
+          <h3 class="result-subtitle">Grade preview</h3>
+          <div id="schoologyPreviewTable" class="table empty">No grade preview yet.</div>
+        </div>
       </section>
 
       <details class="panel setup-panel">

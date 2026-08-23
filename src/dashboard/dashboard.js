@@ -1,4 +1,4 @@
-const BUILD_VERSION = "0.15.1";
+const BUILD_VERSION = "0.16.0";
 const DEFAULT_ASSIGNMENT_TITLE_TEMPLATE = "Khan Minutes - Week of {startDate}";
 const LEGACY_ASSIGNMENT_TITLE_TEMPLATE = "Khan Active Minutes - Week of {startDate}";
 const STORAGE_KEY = "khanGrader.lastCapture";
@@ -1271,7 +1271,7 @@ async function prepareSchoologyAssignments() {
 
   const previousDisabled = setCaptureButtonsDisabled(true);
   try {
-    setStatus(`Finding or creating Schoology assignments for ${assignmentClassConfigs.length} section(s)...`);
+    setStatus(`Preparing assignments for ${assignmentClassConfigs.length} class(es)...`);
     const result = await findOrCreateSchoologyAssignments(assignmentClassConfigs, schoologyConfig, startDate, endDate);
     const updatedConfigs = applyAssignmentIdsToClassConfigs(classConfigs, result.rows);
     loadClassConfigs(updatedConfigs);
@@ -1290,9 +1290,10 @@ async function prepareSchoologyAssignments() {
     const createdCount = result.rows.filter((row) => row.status === "created").length;
     const foundCount = result.rows.filter((row) => row.status === "found").length;
     const errorCount = result.rows.filter((row) => row.status === "error").length;
+    const readyCount = foundCount + createdCount;
     setStatus(errorCount
-      ? `Assignments ready for ${foundCount + createdCount} class(es); ${errorCount} failed.`
-      : `Assignments ready: ${foundCount} found, ${createdCount} created.`);
+      ? `${readyCount} of ${result.rows.length} classes ready; ${errorCount} need${errorCount === 1 ? "s" : ""} attention.`
+      : `${readyCount} classes ready: ${foundCount} existing reused, ${createdCount} new created.`);
   } catch (error) {
     setError(error.message || String(error));
   } finally {
@@ -2410,7 +2411,7 @@ function renderSchoologyPreview(preview) {
 
 function renderAssignmentResults(result) {
   const rows = result?.rows || [];
-  elements.assignmentTable.className = rows.length ? "table" : "table empty";
+  elements.assignmentTable.className = rows.length ? "assignment-results" : "assignment-results empty";
   elements.assignmentTable.innerHTML = "";
 
   if (!rows.length) {
@@ -2418,23 +2419,41 @@ function renderAssignmentResults(result) {
     return;
   }
 
-  const header = document.createElement("div");
-  header.className = "row assignment-preview header";
-  header.innerHTML = "<div>Class</div><div>Assignment</div><div>ID</div><div>Visibility</div><div>Status</div>";
-  elements.assignmentTable.append(header);
+  const foundCount = rows.filter((row) => row.status === "found").length;
+  const createdCount = rows.filter((row) => row.status === "created").length;
+  const errorCount = rows.filter((row) => row.status === "error").length;
+  const readyCount = foundCount + createdCount;
+
+  const summary = document.createElement("div");
+  summary.className = `assignment-run-summary ${errorCount ? "has-errors" : "ready"}`;
+  summary.innerHTML = `
+    <strong>${escapeHtml(errorCount ? `${readyCount} of ${rows.length} classes ready` : `${readyCount} classes ready`)}</strong>
+    <span>${escapeHtml(`${foundCount} existing reused / ${createdCount} new created${errorCount ? ` / ${errorCount} need attention` : ""}`)}</span>
+  `;
+  elements.assignmentTable.append(summary);
+
+  const grid = document.createElement("div");
+  grid.className = "assignment-result-grid";
 
   for (const row of rows) {
-    const line = document.createElement("div");
-    line.className = "row assignment-preview";
-    line.innerHTML = `
-      <div>${escapeHtml(row.className || "")}</div>
-      <div>${escapeHtml(row.verifiedTitle || row.title || "")}<div class="source">${escapeHtml(formatAssignmentDetails(row))}</div></div>
-      <div>${escapeHtml(row.assignmentId || "")}</div>
-      <div>${escapeHtml(formatAssignmentVisibility(row))}</div>
-      <div>${escapeHtml(formatAssignmentStatus(row.status))}${row.search ? `<div class="source">${escapeHtml(formatAssignmentSearch(row.search))}</div>` : ""}${row.selfLink ? `<div class="source">${escapeHtml(row.selfLink)}</div>` : ""}${row.error ? `<div class="source">${escapeHtml(row.error)}</div>` : ""}</div>
+    const outcome = ["found", "created", "error"].includes(row.status) ? row.status : "error";
+    const card = document.createElement("article");
+    card.className = `assignment-result-card ${outcome}`;
+    card.innerHTML = `
+      <div class="assignment-result-header">
+        <strong>${escapeHtml(row.className || "Unnamed class")}</strong>
+        <span class="assignment-outcome">${escapeHtml(formatAssignmentStatus(outcome))}</span>
+      </div>
+      <h4>${escapeHtml(row.verifiedTitle || row.title || "Assignment")}</h4>
+      ${formatAssignmentDetails(row) ? `<p class="assignment-details">${escapeHtml(formatAssignmentDetails(row))}</p>` : ""}
+      ${outcome !== "error" ? `<p class="assignment-readiness">${escapeHtml(formatAssignmentVisibility(row))}</p>` : ""}
+      ${row.assignmentId ? `<p class="assignment-id">Assignment ID ${escapeHtml(row.assignmentId)}</p>` : ""}
+      ${row.search ? `<p class="assignment-search">${escapeHtml(formatAssignmentSearch(row.search, outcome))}</p>` : ""}
+      ${row.error ? `<p class="assignment-error">${escapeHtml(row.error)}</p>` : ""}
     `;
-    elements.assignmentTable.append(line);
+    grid.append(card);
   }
+  elements.assignmentTable.append(grid);
 }
 
 function formatAssignmentDetails(row) {
@@ -2446,37 +2465,34 @@ function formatAssignmentDetails(row) {
   ].filter(Boolean).join(" / ");
 }
 
-function formatAssignmentSearch(search) {
+function formatAssignmentSearch(search, outcome = "") {
   const checked = Number(search?.assignmentsChecked || 0);
   const pages = Number(search?.pagesChecked || 0);
   const matches = Number(search?.titleMatches || 0);
   const rejected = search?.rejectedMatches || [];
   const details = `Checked ${checked} assignment${checked === 1 ? "" : "s"} on ${pages} page${pages === 1 ? "" : "s"}; ${matches} title match${matches === 1 ? "" : "es"}.`;
   if (!rejected.length) return details;
-  return `${details} Rejected match: ${rejected.map((match) => match.reason).join(" ")}`;
+  const reason = rejected.map((match) => match.reason).join(" ");
+  return outcome === "created"
+    ? `${details} A previous match was not reused: ${reason}`
+    : `${details} Match not reused: ${reason}`;
 }
 
 function formatAssignmentVisibility(row) {
   if (row.status === "error") return "";
   return [
-    `Published ${formatSchoologyFlag(row.published)}`,
-    `Available ${formatSchoologyFlag(row.available)}`,
-    `Counts ${formatSchoologyFlag(row.countInGrade)}`,
+    isTruthySchoologyFlag(row.published) ? "Published" : "Not published",
+    isFalsySchoologyFlag(row.available) ? "Not available" : "Available",
+    isTruthySchoologyFlag(row.countInGrade) ? "Counts toward grade" : "Not counted in grade",
     row.maxPoints !== "" ? `${row.maxPoints} pts` : ""
   ].filter(Boolean).join(" / ");
 }
 
-function formatSchoologyFlag(value) {
-  if (value === "" || value === undefined || value === null) return "?";
-  return String(value) === "1" || value === true ? "yes" : "no";
-}
-
 function formatAssignmentStatus(status) {
   return {
-    found: "Found existing",
-    created: "Created",
-    skipped: "Skipped old match",
-    error: "Error"
+    found: "Existing assignment reused",
+    created: "New assignment created",
+    error: "Needs attention"
   }[status] || status || "";
 }
 
