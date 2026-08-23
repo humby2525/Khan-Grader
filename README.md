@@ -152,6 +152,20 @@ The probe runs only in the current browser session and stores output locally in 
 - Khan data is only sent to Schoology after clicking **Send Grades** and confirming the write.
 - The extension requests access to Khan Academy pages and the official Schoology API host.
 
+## Chrome Web Store publishing
+
+Run the packaging script from PowerShell:
+
+```powershell
+.\scripts\package-extension.ps1
+```
+
+It creates `dist\Khan-Grader-<version>.zip` with only the extension's runtime files. Upload that ZIP in the Chrome Web Store Developer Dashboard. Ready-to-paste listing, privacy disclosure, permission justification, and reviewer instructions are in `store\CHROME_WEB_STORE.md`.
+
+The public privacy-policy source is `docs\privacy.html`. After enabling GitHub Pages for the repository's `docs` folder, use the resulting public URL in the Chrome Web Store Privacy practices tab.
+
+Choose **Unlisted** under Distribution. Anyone with the resulting store URL can install the extension, but it will not appear in Chrome Web Store search results. Saved classes, student captures, and Schoology credentials use `chrome.storage.local`, so each Chrome profile and computer must be configured separately.
+
 ## Status
 
-This is still an early teacher workflow tool. Khan capture, local grade preview, Schoology enrollment matching, and reviewed Schoology grade writes are implemented. Assignment creation and Infinite Campus work are intentionally out of scope because the Schoology-to-Infinite-Campus sync handles the final step.
+This is still an early teacher workflow tool. Khan capture, local grade preview, Schoology assignment preparation, enrollment matching, and reviewed Schoology grade writes are implemented. Direct Infinite Campus integration is intentionally out of scope because the Schoology-to-Infinite-Campus sync handles the final step.
