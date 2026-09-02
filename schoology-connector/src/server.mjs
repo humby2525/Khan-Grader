@@ -59,6 +59,9 @@ export function createConnector(config,{schoology,store}={}) {
         auth.rate('authorize',60,60); const params={};
         for(const [k,v] of url.searchParams) {if(k in params) throw new AuthError('invalid_request'); params[k]=v;}
         const tx=auth.begin(params);
+        // HTML form POSTs send Origin: null under no-referrer. Preserve the
+        // same-origin form's Origin while withholding cross-origin referrers.
+        res.setHeader('Referrer-Policy','same-origin');
         res.setHeader('Set-Cookie',`${auth.cookieName}=${tx.cookie}; HttpOnly; SameSite=Lax; Path=/; Max-Age=300${originURL.protocol==='https:'?'; Secure':''}`);
         res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'}); return res.end(consentHtml(tx));
       }

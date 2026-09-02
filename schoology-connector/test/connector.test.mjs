@@ -124,8 +124,14 @@ test('HTTP OAuth, MCP initialization, roster and grade reads; write tools absent
   const client=await (await post('/register',{redirect_uris:[redirect],token_endpoint_auth_method:'none'})).json();
   const verifier=random(), params={client_id:client.client_id,redirect_uri:redirect,response_type:'code',code_challenge:hash(verifier),code_challenge_method:'S256',scope:'schoology:read',resource:auth.resource,state:random()};
   const consent=await fetch(base+'/authorize?'+new URLSearchParams(params));const html=await consent.text();const transaction=html.match(/name="transaction" value="([^"]+)"/)[1];
+  assert.equal(consent.headers.get('referrer-policy'),'same-origin');
   const cookie=consent.headers.get('set-cookie').split(';')[0];
+  for(const origin of ['null','https://evil.test','https://chatgpt.com']) {
+    const blocked=await post('/authorize',{transaction,password},{Cookie:cookie,Origin:origin});
+    assert.equal(blocked.status,origin==='https://chatgpt.com'?400:403);
+  }
   const approved=await post('/authorize',{transaction,password},{Cookie:cookie,Origin:auth.origin});assert.equal(approved.status,303);
+  assert.equal(approved.headers.get('referrer-policy'),'no-referrer');
   const code=new URL(approved.headers.get('location')).searchParams.get('code');
   const tokenResponse=await post('/token',{grant_type:'authorization_code',code,code_verifier:verifier,client_id:client.client_id,redirect_uri:redirect,resource:auth.resource});
   const token=await tokenResponse.json();assert(token.access_token);
