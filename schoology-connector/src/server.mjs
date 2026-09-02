@@ -43,7 +43,9 @@ export function createConnector(config,{schoology,store}={}) {
   schoology ||= new Schoology(config);
   const server=createServer(async(req,res)=>{
     res.setHeader('Cache-Control','no-store'); res.setHeader('X-Content-Type-Options','nosniff');
-    res.setHeader('Referrer-Policy','no-referrer'); res.setHeader('Content-Security-Policy',"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+    // Chrome applies form-action to the post-consent redirect as well as the
+    // form POST. Callback paths are separately validated by the OAuth layer.
+    res.setHeader('Referrer-Policy','no-referrer'); res.setHeader('Content-Security-Policy',"default-src 'none'; form-action 'self' https://chatgpt.com; frame-ancestors 'none'; base-uri 'none'");
     if(originURL.protocol==='https:') res.setHeader('Strict-Transport-Security','max-age=31536000');
     try {
       const url=new URL(req.url,config.origin), path=url.pathname;
