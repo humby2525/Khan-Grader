@@ -2143,7 +2143,7 @@ function buildGradePreviewRow(student, classConfig, grading) {
     studentName: student.studentName || "",
     schoologyName: "",
     sectionId: classConfig?.schoologySectionId || "",
-    assignmentId: classConfig?.schoologyAssignmentId || "",
+    assignmentId: "", // Resolved only after verifying assignment title and captured dates.
     enrollmentId: "",
     metricMinutes: minutes,
     grade,
