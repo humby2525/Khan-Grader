@@ -13,40 +13,48 @@
           <h1>Khan Grader</h1>
           <p>Khan Academy minutes to Schoology grades.</p>
         </div>
-        <span id="build">v0.16.1</span>
+        <span id="build">v0.17.0</span>
       </header>
 
       <section class="panel weekly-panel">
         <div class="section-header">
-          <h2>Weekly Run</h2>
+          <div>
+            <h2>Weekly Khan Workflow</h2>
+            <p class="muted">Grade the completed week and prepare the upcoming week in one visit.</p>
+          </div>
         </div>
-        <div class="week-picker">
-          <label>
-            Week start
-            <input id="weekStart" type="date">
-          </label>
-          <label>
-            Week end
-            <input id="weekEnd" type="date">
-          </label>
-        </div>
-        <div class="workflow-actions">
-          <button id="prepareAssignmentsButton" class="workflow-action" type="button">
-            <span class="step-number">1</span>
-            <span><strong>Prepare Assignments</strong><small>Reuse existing or create missing</small></span>
-          </button>
-          <button id="captureAllClassesButton" class="workflow-action" type="button">
-            <span class="step-number">2</span>
-            <span><strong>Capture Minutes</strong><small>After the week</small></span>
-          </button>
-          <button id="previewSchoologyButton" class="workflow-action" type="button">
-            <span class="step-number">3</span>
-            <span><strong>Review Grades</strong><small>Check student matches</small></span>
-          </button>
-          <button id="sendSchoologyButton" class="workflow-action send" type="button">
-            <span class="step-number">4</span>
-            <span><strong>Send Grades</strong><small>Publish to Schoology</small></span>
-          </button>
+        <div class="weekly-workflow-grid">
+          <section class="week-workflow" aria-labelledby="gradeWeekHeading">
+            <h3 id="gradeWeekHeading">1. Grade Last Week</h3>
+            <p class="week-help">Capture the completed Monday–Friday, then review grades before sending to Schoology.</p>
+            <div class="week-picker">
+              <label>Start date<input id="weekStart" type="date"></label>
+              <label>End date<input id="weekEnd" type="date"></label>
+            </div>
+            <div class="workflow-actions">
+              <button id="captureAllClassesButton" class="workflow-action" type="button">
+                <span><strong>Capture Minutes</strong><small>From Khan Academy</small></span>
+              </button>
+              <button id="previewSchoologyButton" class="workflow-action" type="button">
+                <span><strong>Review Grades</strong><small>Check each student</small></span>
+              </button>
+              <button id="sendSchoologyButton" class="workflow-action send" type="button">
+                <span><strong>Send Grades</strong><small>Publish to Schoology</small></span>
+              </button>
+            </div>
+          </section>
+          <section class="week-workflow" aria-labelledby="prepareWeekHeading">
+            <h3 id="prepareWeekHeading">2. Prepare Next Week</h3>
+            <p class="week-help">Create or reuse next week's Schoology assignments without changing the grading dates.</p>
+            <div class="week-picker">
+              <label>Start date<input id="prepareWeekStart" type="date"></label>
+              <label>End date<input id="prepareWeekEnd" type="date"></label>
+            </div>
+            <p class="due-summary">Schoology due: <strong id="prepareDueSummary">Friday at 11:59 PM</strong></p>
+            <button id="prepareAssignmentsButton" class="workflow-action prepare-button" type="button">
+              <span><strong>Prepare Assignments</strong><small>Reuse existing or create missing</small></span>
+            </button>
+          </section>
         </div>
         <details class="advanced-options compact">
           <summary>Individual Khan tools</summary>
@@ -61,7 +69,7 @@
         </details>
       </section>
 
-      <p id="status" class="status" role="status" aria-live="polite">Choose the week, then start with Prepare Assignments.</p>
+      <p id="status" class="status" role="status" aria-live="polite">Capture last week's minutes, review and send grades, then prepare next week.</p>
 
       <section class="summary-grid" aria-label="Latest Khan capture summary">
         <article>
@@ -125,6 +133,7 @@
                 <div class="class-fields">
                   <label>Class name<input id="className1" type="text" placeholder="Example: Algebra 1"></label>
                   <label>Goal minutes<input id="classTargetMinutes1" type="number" min="1" step="1" placeholder="Default"></label>
+                  <label>Grading method<select id="classGradingMethod1"><option value="proportional">Proportional points</option><option value="pass_fail">Pass/Fail (full points or 0)</option></select></label>
                   <label class="wide-field">Khan roster URL<input id="classUrl1" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster"></label>
                   <label>Schoology section ID<input id="classSectionId1" type="text" inputmode="numeric" placeholder="Section ID"></label>
                   <label>Grading category<select id="classCategoryName1"><option value="">Schoology default</option></select></label>
@@ -139,6 +148,7 @@
                 <div class="class-fields">
                   <label>Class name<input id="className2" type="text" placeholder="Example: Geometry"></label>
                   <label>Goal minutes<input id="classTargetMinutes2" type="number" min="1" step="1" placeholder="Default"></label>
+                  <label>Grading method<select id="classGradingMethod2"><option value="proportional">Proportional points</option><option value="pass_fail">Pass/Fail (full points or 0)</option></select></label>
                   <label class="wide-field">Khan roster URL<input id="classUrl2" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster"></label>
                   <label>Schoology section ID<input id="classSectionId2" type="text" inputmode="numeric" placeholder="Section ID"></label>
                   <label>Grading category<select id="classCategoryName2"><option value="">Schoology default</option></select></label>
@@ -153,6 +163,7 @@
                 <div class="class-fields">
                   <label>Class name<input id="className3" type="text" placeholder="Example: Math 8"></label>
                   <label>Goal minutes<input id="classTargetMinutes3" type="number" min="1" step="1" placeholder="Default"></label>
+                  <label>Grading method<select id="classGradingMethod3"><option value="proportional">Proportional points</option><option value="pass_fail">Pass/Fail (full points or 0)</option></select></label>
                   <label class="wide-field">Khan roster URL<input id="classUrl3" type="url" placeholder="https://classroom.khanacademy.org/teacher/class/.../roster"></label>
                   <label>Schoology section ID<input id="classSectionId3" type="text" inputmode="numeric" placeholder="Section ID"></label>
                   <label>Grading category<select id="classCategoryName3"><option value="">Schoology default</option></select></label>
@@ -174,8 +185,6 @@
               <label>Default goal minutes<input id="gradeTargetMinutes" type="number" min="1" step="1" value="50"></label>
               <label>Max points<input id="gradeMaxPoints" type="number" min="1" step="1" value="100"></label>
               <label class="wide-field">Assignment title<input id="assignmentTitleTemplate" type="text" value="Khan Minutes - Week of {startDate}"></label>
-              <label>Due date<input id="assignmentDueDate" type="date"></label>
-              <label>Due time<input id="assignmentDueTime" type="time" value="23:59"></label>
             </div>
           </section>
 

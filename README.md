@@ -2,6 +2,28 @@
 
 Khan Grader is a Manifest V3 Chrome extension for capturing student activity minutes from Khan Academy, converting those minutes into simple point grades, and sending reviewed grades to an existing Schoology assignment.
 
+## Weekend workflow (grading last week and preparing next week)
+
+The dashboard has two independent Monday–Friday date ranges. On Saturday or Sunday it defaults to the school week that just ended for **Grade Last Week**, and the upcoming school week for **Prepare Next Week**. Both ranges remain editable for holidays or catch-up grading.
+
+1. In **Grade Last Week**, click **Capture Minutes** for the completed week.
+2. Click **Review Grades** to check every student, the class-specific grading method, the minutes, and the correct Schoology assignment. Click **Send Grades** only after checking.
+3. In **Prepare Next Week**, click **Prepare Assignments** for the upcoming week. Each new assignment is automatically due at **11:59 PM on the selected end date**.
+4. If a holiday changes the actual due date, edit that one assignment manually in Schoology. Khan Grader does not overwrite the due date of an existing reused assignment.
+
+**Important:** The Schoology assignment used for grades is verified against the captured week and class. Preparing next week's assignment must not redirect last week's grades.
+
+### Class-by-class grading
+
+Under **Setup → Classes**, choose a grading method for each class:
+
+- **Proportional points** (existing default): `min(max points, round(minutes / goal minutes × max points))`
+- **Pass/Fail**: below the class's goal minutes earns **0**; meeting or exceeding the goal earns **full points**
+
+The global **Grade from** setting still chooses Time on task or Exercises. Each class can have its own goal minutes and grading method. Unavailable Khan minute totals are flagged instead of being graded as zero.
+
+Run regression tests with `node --test tests/weekend-workflow.test.cjs`.
+
 ## One-student workflow
 
 1. Open Khan Academy.
@@ -61,7 +83,7 @@ Schoology writes are review-first. Capturing Khan data does not send anything to
    - Grade from: Time on task or Exercises
    - Default required minutes
    - Max points
-   - Assignment due date and due time
+   - Assignment title template (due date is now automatic)
    - Grading category, grading task, and grading period, if your Schoology setup requires them
 2. Enter the API base, consumer key, and consumer secret under **Schoology Connection**.
 3. Click **Save Schoology Settings**.
@@ -97,9 +119,9 @@ Set up Schoology choices once for each class:
 
 For each weekly assignment:
 
-1. Choose the week start and end dates.
-2. Enter an assignment title template, such as `Khan Minutes - Week of {startDate}`.
-3. Enter a due date and due time. If due date is blank, the extension uses the selected week end date.
+1. Choose the upcoming Monday–Friday dates in **Prepare Next Week**.
+2. Set the assignment title template in **Setup**, such as `Khan Minutes - Week of {startDate}` (only when you want to change it).
+3. The Schoology due date automatically matches the selected end date at **11:59 PM**.
 4. Click **Prepare Assignments**.
 
 The extension checks every page of each section's assignment list for an existing assignment with the same normalized title. It also verifies any internally saved assignment ID directly. If it finds a published, available, count-in-grade assignment whose documented category and period match the class setup, it reuses that assignment. If it does not find a reusable match, it creates the assignment and saves the returned ID internally. The assignment description tells students to spend the class goal minutes on Khan that week.
