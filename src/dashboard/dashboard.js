@@ -38,11 +38,17 @@ async function init() {
   elements.copyDiagnosticsButton.addEventListener("click", copyDiagnostics);
   elements.copyNetworkProbeButton.addEventListener("click", copyNetworkProbe);
   elements.prepareWeekEnd.addEventListener("change", updateDueSummary);
+  const gradeInputIds = ["gradeMetric", "gradeTargetMinutes", "gradeMaxPoints", "weekStart", "weekEnd"];
   for (let index = 1; index <= 3; index += 1) {
-    elements[`classGradingMethod${index}`].addEventListener("change", () => {
+    for (const prefix of ["classGradingMethod", "classTargetMinutes", "className", "classSectionId"]) {
+      gradeInputIds.push(`${prefix}${index}`);
+    }
+  }
+  for (const id of gradeInputIds) {
+    elements[id].addEventListener("change", () => {
       lastSchoologyPreview = null;
       renderSchoologyPreview(null);
-      setStatus("Grading method changed. Review the grades again before sending.");
+      setStatus("Grading settings or dates changed. Capture the selected dates and review grades before sending.");
     });
   }
 
@@ -1363,6 +1369,11 @@ async function previewSchoologyGrades() {
     setError("Capture Khan class data before previewing Schoology grades.");
     return;
   }
+  if (lastCapture?.expectedWeekStart !== elements.weekStart.value ||
+      lastCapture?.expectedWeekEnd !== elements.weekEnd.value) {
+    setError("The captured Khan dates do not match the selected Grade Last Week dates. Capture those dates again before reviewing grades.");
+    return;
+  }
 
   const classConfigs = readClassConfigs();
   const targetValidation = validateClassTargetMinutes(classConfigs);
@@ -1926,7 +1937,11 @@ async function resolveGradingAssignmentForWeek(classConfig, schoologyConfig, sta
 
   const sectionId = String(classConfig.schoologySectionId);
   const expectedTitle = renderAssignmentTitle(schoologyConfig.assignmentTitleTemplate, startDate, endDate);
-  const expectedKey = normalizeSchoologyAssignmentTitle(expectedTitle);
+  const expectedTitles = [expectedTitle];
+  if (schoologyConfig.assignmentTitleTemplate === DEFAULT_ASSIGNMENT_TITLE_TEMPLATE) {
+    expectedTitles.push(renderAssignmentTitle(LEGACY_ASSIGNMENT_TITLE_TEMPLATE, startDate, endDate));
+  }
+  const expectedKeys = new Set(expectedTitles.map(normalizeSchoologyAssignmentTitle));
   const mapKey = assignmentWeekKey(sectionId, startDate, endDate);
   const checkedIds = new Set();
   const rejectionReasons = [];
@@ -1944,7 +1959,7 @@ async function resolveGradingAssignmentForWeek(classConfig, schoologyConfig, sta
       throw error;
     }
 
-    if (normalizeSchoologyAssignmentTitle(assignment?.title) !== expectedKey) return null;
+    if (!expectedKeys.has(normalizeSchoologyAssignmentTitle(assignment?.title))) return null;
     const summary = summarizeSchoologyAssignment(assignment);
     if (!isTruthySchoologyFlag(summary.published) || !isTruthySchoologyFlag(summary.countInGrade)) {
       rejectionReasons.push("The matching assignment is unpublished or excluded from grades.");
@@ -1971,7 +1986,7 @@ async function resolveGradingAssignmentForWeek(classConfig, schoologyConfig, sta
 
   const search = await fetchSchoologyAssignments(sectionId, schoologyConfig);
   const matches = search.assignments.filter((assignment) =>
-    normalizeSchoologyAssignmentTitle(assignment?.title) === expectedKey
+    expectedKeys.has(normalizeSchoologyAssignmentTitle(assignment?.title))
   );
   const verifiedMatches = [];
   for (const match of matches) {
@@ -2036,6 +2051,7 @@ async function buildSchoologyPreview(students, classConfigs, schoologyConfig) {
       const classConfig = configsByClass.get(normalizeName(student.className)) || (classConfigs.length === 1 ? classConfigs[0] : null);
       const baseRow = buildGradePreviewRow(student, classConfig, grading);
       if (!classConfig?.schoologySectionId) return { ...baseRow, status: "missing_section" };
+      if (baseRow.status !== "ready") return baseRow;
       const resolved = resolvedAssignments.get(String(classConfig.schoologySectionId));
       if (!resolved?.assignmentId) {
         return {
@@ -2115,10 +2131,12 @@ async function buildSchoologyRosterTestPreview(classConfigs, schoologyConfig) {
 }
 
 function buildGradePreviewRow(student, classConfig, grading) {
-  const minutes = Number(student[grading.metric] || 0);
+  const rawMinutes = student[grading.metric];
+  const minutes = rawMinutes === null || rawMinutes === undefined || rawMinutes === "" ? null : Number(rawMinutes);
+  const validMinutes = Number.isFinite(minutes) && minutes >= 0;
   const targetMinutes = resolveTargetMinutes(classConfig, grading.targetMinutes);
   const gradingMethod = classConfig?.gradingMethod === "pass_fail" ? "pass_fail" : "proportional";
-  const grade = calculateGrade(minutes, targetMinutes, grading.maxPoints, gradingMethod);
+  const grade = validMinutes ? calculateGrade(minutes, targetMinutes, grading.maxPoints, gradingMethod) : null;
   const dateRange = student.detectedDateRange || lastCapture?.dateRange || "";
   return {
     className: student.className || "",
@@ -2132,8 +2150,9 @@ function buildGradePreviewRow(student, classConfig, grading) {
     targetMinutes,
     gradingMethod,
     dateRange,
-    status: "ready",
-    comment: `Khan ${grading.metricLabel}: ${minutes} min; target ${targetMinutes} min; ${gradingMethod === "pass_fail" ? "Pass/Fail" : "Proportional"}; ${dateRange}`
+    status: validMinutes ? "ready" : "missing_minutes",
+    error: validMinutes ? "" : "Khan did not return the selected minute total. No grade will be sent for this student.",
+    comment: validMinutes ? `Khan ${grading.metricLabel}: ${minutes} min; target ${targetMinutes} min; ${gradingMethod === "pass_fail" ? "Pass/Fail" : "Proportional"}; ${dateRange}` : ""
   };
 }
 
@@ -2652,7 +2671,8 @@ function formatPreviewStatus(status) {
     ready: "Ready",
     sent: "Sent",
     missing_section: "Missing section ID",
-    missing_assignment: "Missing assignment ID",
+    missing_assignment: "No assignment for this week",
+    missing_minutes: "Missing Khan minutes",
     no_match: "No Schoology match",
     send_error: "Send error",
     test_ready: "Test ready"
