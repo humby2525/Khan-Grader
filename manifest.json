@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "Khan Grader",
   "description": "Capture Khan Academy individual student report minutes for teacher review.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqMBYsItgHhOZ1VA6BKIul3BYm4/q6pZ69AYUW1nKxP+rNctWuIguuPAY5B7fWHzqiAqh4wuafCWujulEBUZP+JtKx7BuJjnp1YZyuEtBttordPnEdIhxp2HGebXUlQx802PtYFg75xARWaqF5jQZfPZf3bA308TFB1vzSgFH1JJIiFgi7KbcHp+cPPOrOi7IAOR3uRV/R36N5Rcm3Or3tkVSYMKefWseTXMCKlQBDcHzeltqm7r+t4nN0QO6xvCz4uieEYPYiG1lDkQQ/mBqN+QNunTS+z1EwHfcf1AWRL4PIurqP8asASizDqDOV1OgAHPyeZgowJAzGyDejs0cawIDAQAB",
   "version": "0.17.0",
   "homepage_url": "https://github.com/humby2525/Khan-Grader",
   "permissions": [
