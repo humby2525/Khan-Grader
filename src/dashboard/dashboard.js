@@ -413,6 +413,8 @@ async function captureCurrentTab() {
       capturedAt: new Date().toISOString()
     };
 
+    lastSchoologyPreview = null;
+    renderSchoologyPreview(null);
     await chrome.storage.local.set({ [STORAGE_KEY]: lastCapture });
     renderCapture(lastCapture);
 
@@ -459,6 +461,8 @@ async function captureCurrentStudentViaApi() {
     const apiResult = await requestKhanActivityForCurrentStudent(tab, startDate, endDate);
     lastCapture = buildApiCapture(tab, pageCapture, apiResult, startDate, endDate);
 
+    lastSchoologyPreview = null;
+    renderSchoologyPreview(null);
     await chrome.storage.local.set({ [STORAGE_KEY]: lastCapture });
     renderCapture(lastCapture);
     setStatus(`Captured from Khan API: ${lastCapture.studentSummary.studentName || apiResult.studentKaid}, ${formatMinutes(apiResult.exerciseMinutes)} exercises, ${formatMinutes(apiResult.timeOnTaskMinutes)} time on task.`);
@@ -517,6 +521,8 @@ async function captureClassViaApi() {
       };
       lastCapture = buildClassApiCapture(tab, switchRoster, switchResult, startDate, endDate);
 
+      lastSchoologyPreview = null;
+      renderSchoologyPreview(null);
       await chrome.storage.local.set({ [STORAGE_KEY]: lastCapture });
       renderCapture(lastCapture);
 
@@ -530,6 +536,8 @@ async function captureClassViaApi() {
     const apiResult = await requestKhanActivitiesForRoster(tab, rosterResult.students, startDate, endDate);
     lastCapture = buildClassApiCapture(tab, rosterResult, apiResult, startDate, endDate);
 
+    lastSchoologyPreview = null;
+    renderSchoologyPreview(null);
     await chrome.storage.local.set({ [STORAGE_KEY]: lastCapture });
     renderCapture(lastCapture);
 
@@ -582,6 +590,8 @@ async function captureAllClassesViaApi() {
     }
 
     lastCapture = buildAllClassesCapture(classCaptures, diagnostics, startDate, endDate);
+    lastSchoologyPreview = null;
+    renderSchoologyPreview(null);
     await chrome.storage.local.set({ [STORAGE_KEY]: lastCapture });
     renderCapture(lastCapture);
     setStatus(`Captured ${lastCapture.studentSummaries.length} student rows across ${classCaptures.length} class(es).`);
@@ -1306,7 +1316,15 @@ async function prepareSchoologyAssignments() {
     const result = await findOrCreateSchoologyAssignments(assignmentClassConfigs, schoologyConfig, startDate, endDate);
     const updatedConfigs = applyAssignmentIdsToClassConfigs(classConfigs, result.rows);
     loadClassConfigs(updatedConfigs);
-    await chrome.storage.local.set({ [CLASS_CONFIG_STORAGE_KEY]: updatedConfigs });
+    for (const row of result.rows) {
+      if (row.assignmentId && ["found", "created"].includes(row.status)) {
+        assignmentsByWeek[assignmentWeekKey(row.sectionId, startDate, endDate)] = String(row.assignmentId);
+      }
+    }
+    await chrome.storage.local.set({
+      [CLASS_CONFIG_STORAGE_KEY]: updatedConfigs,
+      [ASSIGNMENTS_BY_WEEK_STORAGE_KEY]: assignmentsByWeek
+    });
     renderAssignmentResults(result);
     lastNetworkProbe = {
       build: BUILD_VERSION,
@@ -1443,9 +1461,9 @@ async function sendSchoologyGrades() {
   }
 
   if (!lastSchoologyPreview) {
-    await previewSchoologyGrades();
+    setError("Review Grades before sending. Grade changes must be checked first.");
+    return;
   }
-  if (!lastSchoologyPreview) return;
 
   const readyRows = lastSchoologyPreview.rows.filter((row) => row.status === "ready");
   if (!readyRows.length) {
@@ -1454,9 +1472,12 @@ async function sendSchoologyGrades() {
   }
 
   const isTestPreview = Boolean(lastSchoologyPreview.testMode);
+  const weekLabel = lastSchoologyPreview.expectedWeekStart && lastSchoologyPreview.expectedWeekEnd
+    ? ` for ${lastSchoologyPreview.expectedWeekStart} through ${lastSchoologyPreview.expectedWeekEnd}`
+    : "";
   const confirmed = window.confirm(isTestPreview
     ? `Send ${readyRows.length} TEST grade(s) to Schoology? Use this only with a test assignment.`
-    : `Send ${readyRows.length} Khan grade(s) to Schoology? This will update the selected assignment grade(s).`);
+    : `Send ${readyRows.length} Khan grade(s)${weekLabel} to Schoology? This will update the assignments for the captured week.`);
   if (!confirmed) {
     setStatus("Schoology send canceled.");
     return;
@@ -1892,6 +1913,85 @@ function formatShortDate(date) {
   });
 }
 
+// Save and resolve assignments by class AND week. A single latest-assignment ID
+// cannot safely grade last week after next week's assignment has been prepared.
+function assignmentWeekKey(sectionId, startDate, endDate) {
+  return `${String(sectionId)}|${startDate}|${endDate}`;
+}
+
+async function resolveGradingAssignmentForWeek(classConfig, schoologyConfig, startDate, endDate) {
+  if (!isValidDateInput(startDate) || !isValidDateInput(endDate) || startDate > endDate) {
+    return { assignmentId: "", error: "Capture the Khan dates before reviewing grades." };
+  }
+
+  const sectionId = String(classConfig.schoologySectionId);
+  const expectedTitle = renderAssignmentTitle(schoologyConfig.assignmentTitleTemplate, startDate, endDate);
+  const expectedKey = normalizeSchoologyAssignmentTitle(expectedTitle);
+  const mapKey = assignmentWeekKey(sectionId, startDate, endDate);
+  const checkedIds = new Set();
+  const rejectionReasons = [];
+
+  async function checkExistingAssignment(id) {
+    const candidateId = compactText(id);
+    if (!candidateId || checkedIds.has(candidateId)) return null;
+    checkedIds.add(candidateId);
+
+    let assignment;
+    try {
+      assignment = await fetchSchoologyAssignment(sectionId, candidateId, schoologyConfig);
+    } catch (error) {
+      if (isSchoologyNotFoundError(error)) return null;
+      throw error;
+    }
+
+    if (normalizeSchoologyAssignmentTitle(assignment?.title) !== expectedKey) return null;
+    const summary = summarizeSchoologyAssignment(assignment);
+    if (!isTruthySchoologyFlag(summary.published) || !isTruthySchoologyFlag(summary.countInGrade)) {
+      rejectionReasons.push("The matching assignment is unpublished or excluded from grades.");
+      return null;
+    }
+    // Reusing an assignment after its due date is normal for weekend grading;
+    // student availability is not a reason to reject a teacher grade update.
+    if (summary.maxPoints !== "" && Number(summary.maxPoints) !== Number(schoologyConfig.gradeMaxPoints)) {
+      rejectionReasons.push(`A matching assignment has ${summary.maxPoints} points, but the grading setting is ${schoologyConfig.gradeMaxPoints}.`);
+      return null;
+    }
+    return candidateId;
+  }
+
+  // Verify the date-specific saved ID first. Never trust an unverified latest ID.
+  for (const candidateId of [assignmentsByWeek[mapKey], classConfig.schoologyAssignmentId]) {
+    const verified = await checkExistingAssignment(candidateId);
+    if (verified) {
+      assignmentsByWeek[mapKey] = verified;
+      await chrome.storage.local.set({ [ASSIGNMENTS_BY_WEEK_STORAGE_KEY]: assignmentsByWeek });
+      return { assignmentId: verified };
+    }
+  }
+
+  const search = await fetchSchoologyAssignments(sectionId, schoologyConfig);
+  const matches = search.assignments.filter((assignment) =>
+    normalizeSchoologyAssignmentTitle(assignment?.title) === expectedKey
+  );
+  const verifiedMatches = [];
+  for (const match of matches) {
+    const verified = await checkExistingAssignment(schoologyAssignmentId(match));
+    if (verified) verifiedMatches.push(verified);
+  }
+  if (verifiedMatches.length === 1) {
+    assignmentsByWeek[mapKey] = verifiedMatches[0];
+    await chrome.storage.local.set({ [ASSIGNMENTS_BY_WEEK_STORAGE_KEY]: assignmentsByWeek });
+    return { assignmentId: verifiedMatches[0] };
+  }
+  if (verifiedMatches.length > 1) {
+    return { assignmentId: "", error: `Multiple Schoology assignments named "${expectedTitle}" were found. Choose the correct one before sending grades.` };
+  }
+  return {
+    assignmentId: "",
+    error: rejectionReasons[0] || `No published Schoology assignment named "${expectedTitle}" was found for ${startDate}–${endDate}. No grades will be sent for this class.`
+  };
+}
+
 async function buildSchoologyPreview(students, classConfigs, schoologyConfig) {
   const configsByClass = new Map();
   for (const config of classConfigs) {
@@ -1906,6 +2006,17 @@ async function buildSchoologyPreview(students, classConfigs, schoologyConfig) {
   for (const sectionId of requiredSections) {
     const enrollments = await fetchSchoologyEnrollments(sectionId, schoologyConfig);
     enrollmentsBySection.set(sectionId, buildEnrollmentLookup(enrollments));
+  }
+
+  const resolvedAssignments = new Map();
+  for (const classConfig of classConfigs) {
+    if (!classConfig.schoologySectionId) continue;
+    const assignment = await resolveGradingAssignmentForWeek(
+      classConfig, schoologyConfig,
+      lastCapture?.expectedWeekStart || "",
+      lastCapture?.expectedWeekEnd || ""
+    );
+    resolvedAssignments.set(String(classConfig.schoologySectionId), assignment);
   }
 
   const grading = {
@@ -1925,7 +2036,14 @@ async function buildSchoologyPreview(students, classConfigs, schoologyConfig) {
       const classConfig = configsByClass.get(normalizeName(student.className)) || (classConfigs.length === 1 ? classConfigs[0] : null);
       const baseRow = buildGradePreviewRow(student, classConfig, grading);
       if (!classConfig?.schoologySectionId) return { ...baseRow, status: "missing_section" };
-      if (!classConfig?.schoologyAssignmentId) return { ...baseRow, status: "missing_assignment" };
+      const resolved = resolvedAssignments.get(String(classConfig.schoologySectionId));
+      if (!resolved?.assignmentId) {
+        return {
+          ...baseRow, assignmentId: "", status: "missing_assignment",
+          error: resolved?.error || "No assignment found for the captured week."
+        };
+      }
+      baseRow.assignmentId = resolved.assignmentId;
 
       const enrollment = findEnrollmentForStudent(student.studentName, enrollmentsBySection.get(classConfig.schoologySectionId));
       if (!enrollment) return { ...baseRow, status: "no_match" };
